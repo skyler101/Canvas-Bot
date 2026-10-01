@@ -10,30 +10,37 @@ Every morning, pulls what's due from Canvas and sends you a brief:
 
 Delivered by **email**, **Discord**, and/or **phone push notification** (ntfy).
 
-## 1. Get a Canvas access token
+## 1. Connect Canvas
 
-1. Log in to Canvas → **Account** → **Settings**
-2. Scroll to **Approved Integrations** → **+ New Access Token**
-3. Copy the token (you only see it once). Treat it like a password.
+### Option A — Calendar Feed (works even if access tokens are greyed out)
 
-Your `CANVAS_BASE_URL` is the address you log in at, e.g. `https://yourschool.instructure.com`.
+1. Open Canvas → **Calendar** (left sidebar)
+2. At the bottom of the right-hand column, click **Calendar Feed**
+3. Copy the link (looks like `https://yourschool.instructure.com/feeds/calendars/user_abc123.ics`)
+4. Use it as `CANVAS_ICS_URL`. It's a private link, so don't share it.
 
-> Some schools disable student tokens. If so, the alternative is the Canvas
-> **calendar feed** (Calendar → *Calendar Feed* link, an `.ics` URL) — ask and
-> this bot can be adapted to read that instead.
+The feed has every assignment/quiz due date and class event, but **not** whether
+you've submitted something, missing work, grades, or announcements. Turn on
+Canvas **Notifications** (Account → Notifications → email/push) for those.
+
+### Option B — Access token (more detail, if your school allows it)
+
+Canvas → **Account** → **Settings** → **Approved Integrations** → **+ New Access Token**.
+Set `CANVAS_BASE_URL` (e.g. `https://yourschool.instructure.com`) and `CANVAS_TOKEN`.
+This adds submission status, missing work, grades, and announcements.
 
 ## 2. Try it locally
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env      # fill in CANVAS_BASE_URL and CANVAS_TOKEN
+cp .env.example .env      # fill in CANVAS_ICS_URL (or CANVAS_BASE_URL + CANVAS_TOKEN)
 python morning_brief.py --dry-run
 ```
 
 ## 3. Run it automatically every morning (free, via GitHub Actions)
 
 1. In this repo on GitHub: **Settings → Secrets and variables → Actions**
-2. Add **secrets**: `CANVAS_BASE_URL`, `CANVAS_TOKEN`, plus any delivery ones you want:
+2. Add **secrets**: `CANVAS_ICS_URL` (or `CANVAS_BASE_URL` + `CANVAS_TOKEN`), plus any delivery ones you want:
    - Email: `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, `EMAIL_TO`
      (Gmail: `smtp.gmail.com`, and create an [App Password](https://myaccount.google.com/apppasswords))
    - Discord: `DISCORD_WEBHOOK_URL` (Channel → Edit → Integrations → Webhooks)

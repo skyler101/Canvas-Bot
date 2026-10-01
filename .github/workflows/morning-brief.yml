@@ -19,6 +19,7 @@ jobs:
         env:
           CANVAS_BASE_URL: ${{ secrets.CANVAS_BASE_URL }}
           CANVAS_TOKEN: ${{ secrets.CANVAS_TOKEN }}
+          CANVAS_ICS_URL: ${{ secrets.CANVAS_ICS_URL }}
           TIMEZONE: ${{ vars.TIMEZONE || 'America/New_York' }}
           DAYS_AHEAD: ${{ vars.DAYS_AHEAD || '7' }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

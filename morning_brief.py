@@ -9,6 +9,7 @@ Configuration comes from environment variables (or a .env file); see .env.exampl
 
 import argparse
 import os
+import re
 import smtplib
 import sys
 from datetime import datetime, timedelta, timezone
@@ -26,6 +27,8 @@ except ImportError:
 
 CANVAS_BASE_URL = os.environ.get("CANVAS_BASE_URL", "").rstrip("/")
 CANVAS_TOKEN = os.environ.get("CANVAS_TOKEN", "")
+# Alternative to a token: Canvas -> Calendar -> "Calendar Feed" link (.ics URL)
+CANVAS_ICS_URL = os.environ.get("CANVAS_ICS_URL", "")
 TZ = ZoneInfo(os.environ.get("TIMEZONE", "America/New_York"))
 DAYS_AHEAD = int(os.environ.get("DAYS_AHEAD", "7"))
 CLAUDE_MODEL = "claude-opus-5-5"
@@ -166,6 +169,58 @@ def collect(now):
     return {"courses": courses, "upcoming": upcoming, "missing": missing, "announcements": announcements}
 
 
+# ---------------------------------------------------------------- Calendar feed
+
+
+def collect_from_ics(now):
+    """Build the brief from the Canvas calendar feed when API tokens are disabled.
+
+    The feed has due dates for assignments/quizzes plus course events, but no
+    submission status, grades, or announcements.
+    """
+    from icalendar import Calendar
+
+    # webcal:// links are just https under another name
+    url = CANVAS_ICS_URL.replace("webcal://", "https://", 1)
+    resp = requests.get(url, timeout=30)
+    resp.raise_for_status()
+    cal = Calendar.from_ical(resp.content)
+
+    end = now + timedelta(days=DAYS_AHEAD)
+    upcoming = []
+    for ev in cal.walk("VEVENT"):
+        start = ev.get("DTSTART")
+        if not start:
+            continue
+        due = start.dt
+        if isinstance(due, datetime):
+            due = (due if due.tzinfo else due.replace(tzinfo=timezone.utc)).astimezone(TZ)
+        else:  # all-day event: treat as due at 11:59 PM that day
+            due = datetime(due.year, due.month, due.day, 23, 59, tzinfo=TZ)
+        if not (now <= due <= end):
+            continue
+
+        # Canvas summaries look like "Essay 2 [ENGL101-01]"
+        summary = str(ev.get("SUMMARY", "(untitled)"))
+        title, course = summary, ""
+        m = re.match(r"^(.*)\s*\[(.+)\]\s*$", summary)
+        if m:
+            title, course = m.group(1).strip(), m.group(2)
+        uid = str(ev.get("UID", ""))
+        upcoming.append(
+            {
+                "course": course,
+                "title": title,
+                "type": "assignment" if "assignment" in uid else "event",
+                "points": None,
+                "due": due,
+                "url": str(ev.get("URL", "")),
+            }
+        )
+    upcoming.sort(key=lambda a: a["due"])
+    return {"courses": {}, "upcoming": upcoming, "missing": [], "announcements": []}
+
+
 def render_plain(data, now):
     lines = [f"# Morning Brief — {now.strftime('%A, %B %-d')}", ""]
 
@@ -181,7 +236,9 @@ def render_plain(data, now):
         lines.append("- Nothing due. 🎉")
     for a in data["upcoming"]:
         pts = f" · {a['points']:g} pts" if a["points"] else ""
-        lines.append(f"- **{fmt_due(a['due'], now)}** — {a['course']}: {a['title']}{pts}")
+        course = f"{a['course']}: " if a["course"] else ""
+        tag = " (class event)" if a["type"] == "event" else ""
+        lines.append(f"- **{fmt_due(a['due'], now)}** — {course}{a['title']}{pts}{tag}")
     lines.append("")
 
     if data["announcements"]:
@@ -213,7 +270,8 @@ def ai_study_plan(plain_brief, now):
         "time estimates, weighing due date, points, missing work, and weak grades.\n"
         "3. 'What to study': specific topics/courses to review and why (upcoming quizzes/"
         "exams, low grades).\n"
-        "Be concise and practical. Use Markdown. Don't invent assignments that aren't listed.\n\n"
+        "If the data has no submission status, remind me to skip anything already "
+        "turned in. Be concise and practical. Use Markdown. Don't invent assignments that aren't listed.\n\n"
         + plain_brief
     )
     response = client.beta.messages.create(
@@ -286,11 +344,13 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="print only, don't deliver")
     args = parser.parse_args()
 
-    if not (CANVAS_BASE_URL and CANVAS_TOKEN):
-        sys.exit("Set CANVAS_BASE_URL and CANVAS_TOKEN (see .env.example).")
-
     now = datetime.now(TZ)
-    data = collect(now)
+    if CANVAS_BASE_URL and CANVAS_TOKEN:
+        data = collect(now)
+    elif CANVAS_ICS_URL:
+        data = collect_from_ics(now)
+    else:
+        sys.exit("Set CANVAS_ICS_URL, or CANVAS_BASE_URL + CANVAS_TOKEN (see .env.example).")
     plain = render_plain(data, now)
 
     brief = plain

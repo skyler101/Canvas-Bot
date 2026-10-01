@@ -1,3 +1,4 @@
 requests>=2.31
 anthropic>=0.70
 python-dotenv>=1.0
+icalendar>=6.0
