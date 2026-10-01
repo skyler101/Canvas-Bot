@@ -1,0 +1,31 @@
+name: Morning Brief
+
+on:
+  schedule:
+    # 11:47 UTC = 7:47 AM Eastern (EDT). Adjust for your timezone; GitHub cron is always UTC.
+    - cron: "47 11 * * *"
+  workflow_dispatch: {}  # lets you run it manually from the Actions tab
+
+jobs:
+  brief:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python morning_brief.py
+        env:
+          CANVAS_BASE_URL: ${{ secrets.CANVAS_BASE_URL }}
+          CANVAS_TOKEN: ${{ secrets.CANVAS_TOKEN }}
+          TIMEZONE: ${{ vars.TIMEZONE || 'America/New_York' }}
+          DAYS_AHEAD: ${{ vars.DAYS_AHEAD || '7' }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT || '587' }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
