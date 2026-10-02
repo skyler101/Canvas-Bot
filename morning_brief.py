@@ -1080,6 +1080,86 @@ def wait_for_internet(timeout=120):
             time.sleep(5)
 
 
+def self_check():
+    """Test each piece and print plain-English results (safe to paste to someone helping you)."""
+    ok = lambda msg: print(f"  OK    {msg}")
+    bad = lambda msg: print(f"  PROBLEM  {msg}")
+    print(f"\nCanvas Morning Brief self-check  (folder: {HERE.name})\n")
+
+    print(f"  info  Python {sys.version.split()[0]}")
+    ok(".env file found") if (HERE / ".env").exists() else bad(
+        ".env file missing. Copy .env.example to .env (setup_windows.bat does this)"
+    )
+    if not CANVAS_BASE_URL:
+        bad("CANVAS_BASE_URL is empty in .env. Set it to https://montana.instructure.com")
+    elif not CANVAS_BASE_URL.startswith("https://") or "/" in CANVAS_BASE_URL[8:]:
+        bad(f"CANVAS_BASE_URL should look like https://montana.instructure.com (yours: {CANVAS_BASE_URL})")
+    else:
+        ok(f"CANVAS_BASE_URL = {CANVAS_BASE_URL}")
+    print(f"  info  TIMEZONE = {TZ.key}")
+
+    logged_in = False
+    if not SESSION_FILE.exists():
+        bad("Not logged in yet. Run: python morning_brief.py --login")
+    elif CANVAS_BASE_URL:
+        try:
+            from playwright.sync_api import sync_playwright
+
+            with sync_playwright() as p:
+                api = p.request.new_context(storage_state=str(SESSION_FILE))
+                r = api.get(f"{CANVAS_BASE_URL}/api/v1/users/self", max_redirects=0, timeout=30_000)
+                if r.status == 200:
+                    name = json.loads(r.text().removeprefix("while(1);")).get("name")
+                    ok(f"Canvas login works (logged in as {name})")
+                    logged_in = True
+                else:
+                    bad(f"Canvas login didn't work (Canvas said {r.status}). Run: python morning_brief.py --login")
+                api.dispose()
+        except Exception as e:
+            bad(f"Couldn't test the Canvas login: {e}")
+
+    path = SETTINGS_FILE if SETTINGS_FILE.exists() else HERE / "my_settings.example.json"
+    if not SETTINGS_FILE.exists():
+        bad("my_settings.json not found, so the example settings are being used. Copy it: copy my_settings.example.json my_settings.json")
+    try:
+        settings = json.loads(path.read_text(encoding="utf-8"))
+        ok(f"{path.name} reads fine")
+    except ValueError as e:
+        bad(f"{path.name} has a typo at line {getattr(e, 'lineno', '?')}: {e.msg if hasattr(e, 'msg') else e}")
+        settings = {}
+
+    good_sites = []
+    for site in settings.get("sites", []):
+        link = str(site.get("canvas_link", ""))
+        label = f"{site.get('type', '?')} ({site.get('course', '')})"
+        if not link.startswith("http"):
+            bad(f"{label}: canvas_link still needs to be pasted in")
+        elif CANVAS_BASE_URL and not link.startswith(CANVAS_BASE_URL):
+            bad(f"{label}: link should start with {CANVAS_BASE_URL} (yours starts with {link[:40]}...)")
+        elif "key=" in link or "ltik=" in link:
+            bad(f"{label}: that's the site's own link with a temporary key. Use the Canvas page address instead")
+        else:
+            ok(f"{label}: link looks right")
+            good_sites.append(site)
+
+    ok("Claude Code found (AI plan on)") if shutil.which("claude") else print(
+        "  info  Claude Code not installed (AI plan off; everything else works)"
+    )
+
+    if good_sites and logged_in:
+        print("\n  Now opening WeBWorK/Labflow in a visible browser so you can watch...\n")
+        from sites import fetch_sites
+
+        results, errors = fetch_sites(good_sites, SESSION_FILE, TZ, DEBUG_DIR, show_browser=True)
+        for idx, items in results.items():
+            ok(f"{good_sites[idx]['type']}: read {len(items)} assignments")
+        for e in errors:
+            bad(e)
+        if errors:
+            print(f"\n  Screenshots of what the bot saw are in: {DEBUG_DIR}")
+    print("\nCopy everything above and send it if you need help (it has no passwords or keys).\n")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="don't send email/Discord/push")
@@ -1089,6 +1169,7 @@ def main():
     parser.add_argument("--startup", action="store_true", help="run once per day, then just reopen")
     parser.add_argument("--install-startup", action="store_true", help="run at Windows login")
     parser.add_argument("--remove-startup", action="store_true", help="undo --install-startup")
+    parser.add_argument("--check", action="store_true", help="test each step and show what's wrong")
     args = parser.parse_args()
 
     # Don't crash on emoji when output goes to a log file (e.g. Task Scheduler)
@@ -1103,6 +1184,9 @@ def main():
         return
     if args.install_startup or args.remove_startup:
         install_startup(remove=args.remove_startup)
+        return
+    if args.check:
+        self_check()
         return
 
     settings = load_settings()

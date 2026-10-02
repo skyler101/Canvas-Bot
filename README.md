@@ -32,6 +32,19 @@ Delivered by **email**, **Discord**, and/or **phone push notification** (ntfy).
 
 The rest of this page explains each piece in detail.
 
+## Something not working?
+
+Run this in the bot's folder:
+
+```
+python morning_brief.py --check
+```
+
+It tests each piece (your `.env`, the Canvas login, your settings file, each
+WeBWorK/Labflow link) and says in plain English what's wrong. If your links look
+right, it opens WeBWorK and Labflow in a visible browser so you can watch what
+happens. The output contains no passwords or keys, so it's safe to share.
+
 ## 1. Connect Canvas
 
 There are three ways. If your school blocks access tokens and third-party apps

@@ -181,7 +181,7 @@ def _find_frame(context, hosts, ready, timeout):
     return None
 
 
-def fetch_sites(sites, session_file, tz, debug_dir):
+def fetch_sites(sites, session_file, tz, debug_dir, show_browser=False):
     """Open each configured site through Canvas and return {site index: [assignments]}.
 
     A site that fails is skipped with a message (and a screenshot in debug_dir),
@@ -191,7 +191,7 @@ def fetch_sites(sites, session_file, tz, debug_dir):
 
     results, errors = {}, []
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=not show_browser)
         try:
             for idx, site in enumerate(sites):
                 kind = site.get("type", "").lower()
