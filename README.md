@@ -103,7 +103,9 @@ Copy `my_settings.example.json` to `my_settings.json` and edit it (Notepad is fi
 - **WeBWorK / Labflow**: these only open from a link inside Canvas, so the bot
   opens that same Canvas link in a hidden browser (using your `--login`) and reads
   the assignments. In Canvas, right-click the WeBWorK or Labflow link, choose
-  **Copy link address**, and paste it as `canvas_link`. Use the Canvas link, not the
+  **Copy link address** (or open the tool's page in Canvas, like "Labflow App" in
+  Modules, and copy the address bar), and paste it as `canvas_link`. If Canvas shows
+  a "Load … in a new window" button, that's fine: the bot clicks it. Use the Canvas link, not the
   webwork3/labflow address it takes you to (those contain short-lived login keys).
   WeBWorK doesn't show whether a set is finished, so tick it off on the dashboard.
   If a site can't be read, the dashboard says so and screenshots go in `debug/`.
