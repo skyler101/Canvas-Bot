@@ -133,7 +133,7 @@ def parse_labflow(text, tz):
     # The "Coming Up" panel is often the only place with dates (modules can be
     # collapsed). Each entry: title line, "Open: ...", "Close: ...", "Cut-Off: ...".
     for item in parse_labflow_coming_up(lines, tz):
-        match = next((o for o in out if o["title"] == item["title"]), None)
+        match = next((o for o in out if o["title"] == item["title"] and o["due"] == item["due"]), None)
         if match:
             match["late_until"] = match["late_until"] or item["late_until"]
             match["done"] = match["done"] or item["done"]
@@ -147,40 +147,60 @@ LF_NOISE = re.compile(
 )
 
 
+LF_STATUS = re.compile(r"^(check|check_?circle)?\s*(attempted|submitted|completed|graded|done)$", re.I)
+LF_LAB = re.compile(r"^Lab \d+\s*:", re.I)
+
+
 def parse_labflow_coming_up(lines, tz):
-    items = []
+    """Read the Coming Up panel. Each entry is a small block of lines, e.g.:
+
+        checkAttempted                          <- status (optional)
+        Pre-Lab Quiz - Inorganic Nomenclature   <- assignment name
+        Lab 5: Inorganic Nomenclature           <- which lab (may share the line above)
+        loop2 of 2 attempts left / calendar_today
+        Open: ... / Close: ... / Cut-Off: ...
+    """
+    items, block_start = [], 0
     for i, line in enumerate(lines):
+        if re.match(r"Coming Up", line, re.I):
+            block_start = i + 1
         mo = re.match(r"Open:\s*" + LF_DATE, line, re.I)
         if not mo:
             continue
         close = cut = None
+        last = i
         for j in range(i + 1, min(i + 4, len(lines))):
             mc = re.match(r"Close:\s*" + LF_DATE, lines[j], re.I)
             mx = re.match(r"Cut-?Off:\s*" + LF_DATE, lines[j], re.I)
+            if mc or mx:
+                last = j
             close = close or (mc and mc.group(1))
             cut = cut or (mx and mx.group(1))
         if not close:
             continue
-        # walk back past icon/attempt lines to the title
-        title_idx = None
-        for j in range(i - 1, max(-1, i - 6), -1):
-            clean = lines[j].lstrip("*• ").strip()
-            if clean and not LF_NOISE.match(clean) and not re.search(r"(Close|Cut-?Off):", clean, re.I):
-                title_idx = j
-                break
-        if title_idx is None:
+        # the lines between the previous entry and this "Open:" line describe this entry
+        block = [l.lstrip("*• ").strip() for l in lines[max(block_start, i - 8) : i]]
+        block_start = last + 1
+        done = any(LF_STATUS.match(l) or re.match(r"^check\s*Attempted", l, re.I) for l in block)
+        names = []
+        for l in block:
+            if not l or LF_NOISE.match(l) or LF_STATUS.match(l):
+                continue
+            l = re.sub(r"^check\s*Attempted\s*", "", l, flags=re.I)
+            if LF_LAB.match(l):
+                continue  # "Lab 5: ..." on its own line
+            l = re.split(r"(?=Lab \d+\s*:)", l)[0].strip()  # "...NomenclatureLab 5: ..." on one line
+            if l:
+                names.append(l)
+        if not names:
             continue
-        title = lines[title_idx].lstrip("*• ").strip()
-        title = re.split(r"(?=Lab \d+\s*:)", title)[0].strip() or title  # drop the "Lab 4: ..." suffix
-        title = re.sub(r"^check\s*Attempted\s*", "", title, flags=re.I)
-        above = " ".join(lines[max(0, title_idx - 1) : title_idx + 1])
         items.append(
             {
-                "title": title,
+                "title": names[-1],
                 "opens": _parse_dt(mo.group(1).upper(), tz, LF_FORMATS),
                 "due": _parse_dt(close.upper(), tz, LF_FORMATS),
                 "late_until": _parse_dt(cut.upper(), tz, LF_FORMATS) if cut else None,
-                "done": bool(re.search(r"Attempted|Submitted|Completed", above, re.I)),
+                "done": done,
             }
         )
     return items
@@ -264,6 +284,19 @@ def _find_frame(context, hosts, ready, timeout, stop_at_login=True):
                 next_click = time.time() + 4
         time.sleep(0.5)
     return None, "timeout"
+
+
+def clean_link(link):
+    """Drop temporary login keys (key=, ltik=, user=...) so a saved link never goes stale."""
+    from urllib.parse import parse_qsl, urlencode, urlunsplit
+
+    u = urlsplit(link)
+    keep = [(k, v) for k, v in parse_qsl(u.query) if k.lower() not in ("key", "ltik", "user", "effectiveuser")]
+    return urlunsplit((u.scheme, u.netloc, u.path, urlencode(keep), u.fragment))
+
+
+def link_goes_to_site(kind, link):
+    return any(h in urlsplit(link).netloc for h in SITE_HOSTS.get(kind, ()))
 
 
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")

@@ -458,7 +458,9 @@ def add_sites(data, settings, now):
         if not str(site.get("canvas_link", "")).startswith("http"):
             errors.append(f"{site.get('type', 'site')} ({site.get('course', '')}): add its Canvas link in my_settings.json")
         else:
-            configured.append(site)
+            from sites import clean_link
+
+            configured.append(dict(site, canvas_link=clean_link(site["canvas_link"])))
     if not configured:
         return errors
     if not SESSION_FILE.exists():
@@ -1139,13 +1141,20 @@ def self_check():
         label = f"{site.get('type', '?')} ({site.get('course', '')})"
         if not link.startswith("http"):
             bad(f"{label}: canvas_link still needs to be pasted in")
-        elif CANVAS_BASE_URL and not link.startswith(CANVAS_BASE_URL):
-            bad(f"{label}: link should start with {CANVAS_BASE_URL} (yours starts with {link[:40]}...)")
-        elif "key=" in link or "ltik=" in link:
-            bad(f"{label}: that's the site's own link with a temporary key. Use the Canvas page address instead")
         else:
-            ok(f"{label}: link looks right")
-            good_sites.append(site)
+            from sites import clean_link, link_goes_to_site
+
+            kind = str(site.get("type", "")).lower()
+            if link_goes_to_site(kind, link):
+                ok(f"{label}: link goes straight to the site (fine; you'll sign in with MSU when asked)")
+            elif CANVAS_BASE_URL and not link.startswith(CANVAS_BASE_URL):
+                bad(f"{label}: link should start with {CANVAS_BASE_URL} or the site's own address (yours: {link[:40]}...)")
+                continue
+            else:
+                ok(f"{label}: link looks right")
+            if clean_link(link) != link:
+                print("  info  (the temporary login key in that link is ignored; it isn't needed)")
+            good_sites.append(dict(site, canvas_link=clean_link(link)))
 
     ok("Claude Code found (AI plan on)") if shutil.which("claude") else print(
         "  info  Claude Code not installed (AI plan off; everything else works)"
