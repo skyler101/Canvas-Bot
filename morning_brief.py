@@ -749,7 +749,9 @@ def ai_input(data, now):
     if data.get("hobby"):
         lines.append(f"\nToday's featured hobby (you may nod to it in the note): {data['hobby']}")
     lines.append(
-        "\nNotes: WeBWorK items don't show whether they're finished. Reminder items are "
+        "\nNotes: For Labflow pre-lab quizzes, the note lists the PDF and videos to finish first "
+        "(with video minutes); include that prep time in the estimate. "
+        "WeBWorK items don't show whether they're finished. Reminder items are "
         "the student's own rules (e.g. post a Packback question a day early); treat them as real tasks."
     )
     return "\n".join(lines)
@@ -1179,6 +1181,8 @@ def self_check():
                 fmt = lambda d: f"{d.strftime('%b')} {d.day} {fmt_clock(d)}" if d else "-"
                 print(f"        {'DONE ' if a.get('done') else ''}{a['title']} | due {fmt(a['due'])}"
                       + (f" | late until {fmt(a['late_until'])}" if a.get("late_until") else ""))
+                if a.get("note"):
+                    print(f"            {a['note']}")
             if items:
                 up, miss = site_items(kind, [dict(a) for a in items], datetime.now(TZ), DAYS_AHEAD)
                 print(f"        -> {len(up)} due in the next {DAYS_AHEAD} days, {len(miss)} late/missing (these go on the dashboard)")

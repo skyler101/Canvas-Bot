@@ -139,7 +139,77 @@ def parse_labflow(text, tz):
             match["done"] = match["done"] or item["done"]
         else:
             out.append(item)
+    attach_lab_details(out, parse_labflow_labs(lines))
     return out
+
+
+LF_LAB_SUMMARY = re.compile(r"^\d+ (videos?|resources?|activit(y|ies))\b", re.I)
+LF_VIDEO = re.compile(r"^(?:Video\s*-\s*)(?P<title>.+?)\s*(?:(?P<m>\d{1,3}):(?P<s>\d\d)\s*min)?$", re.I)
+LF_DURATION = re.compile(r"^(\d{1,3}):(\d\d)\s*min$", re.I)
+LF_PDF = re.compile(r"^(?:Experiment\s+)?PDF\s*-\s*(?P<title>.+)$", re.I)
+
+
+def parse_labflow_labs(lines):
+    """Lab folders (when expanded): {lab name, pdfs, videos, activity titles}.
+
+        Lab 5: Inorganic Nomenclature
+        3 videos + 1 resource + 2 activities
+        PDF - Inorganic Nomenclature
+        Video - Naming Binary Ionic Compounds05:27 min
+        Pre-Lab Quiz - Inorganic NomenclatureOpened ... Closes ...
+        Report - Inorganic NomenclatureOpens ... Closes ...
+    """
+    labs, lab = [], None
+    for i, line in enumerate(lines):
+        nxt = lines[i + 1] if i + 1 < len(lines) else ""
+        if LF_LAB.match(line) and LF_LAB_SUMMARY.match(nxt):
+            lab = {"name": line, "pdfs": [], "videos": [], "activities": []}
+            labs.append(lab)
+            continue
+        if re.match(r"Coming Up", line, re.I):
+            lab = None
+        if lab is None:
+            continue
+        done = i > 0 and lines[i - 1].lower() == "done"
+        pdf = LF_PDF.match(line)
+        if pdf:
+            lab["pdfs"].append({"title": pdf.group("title").strip(), "done": done})
+            continue
+        video = LF_VIDEO.match(line)
+        if video:
+            mins = None
+            if video.group("m"):
+                mins = int(video.group("m")) + int(video.group("s")) / 60
+            elif LF_DURATION.match(nxt):
+                d = LF_DURATION.match(nxt)
+                mins = int(d.group(1)) + int(d.group(2)) / 60
+            lab["videos"].append({"title": video.group("title").strip(), "minutes": mins, "done": done})
+            continue
+        row = LF_ROW.search(line)
+        if row:
+            lab["activities"].append(row.group("title").strip() or lines[i - 1])
+    return labs
+
+
+def attach_lab_details(items, labs):
+    """Tag each assignment with its lab, and tell pre-lab quizzes what to prep first."""
+    for item in items:
+        lab = next((l for l in labs if item["title"] in l["activities"]), None)
+        if lab is None:
+            continue
+        item["lab"] = lab["name"]
+        if not re.match(r"Pre-?Lab", item["title"], re.I):
+            item["note"] = lab["name"]
+            continue
+        todo_pdfs = [p["title"] for p in lab["pdfs"] if not p["done"]]
+        todo_videos = [v for v in lab["videos"] if not v["done"]]
+        parts = [f"PDF – {t}" for t in todo_pdfs]
+        if todo_videos:
+            mins = sum(v["minutes"] or 0 for v in todo_videos)
+            n = len(todo_videos)
+            parts.append(f"{n} video{'s' if n != 1 else ''}" + (f" (~{round(mins)} min)" if mins else ""))
+        item["prep_minutes"] = round(sum(v["minutes"] or 0 for v in todo_videos))
+        item["note"] = f"{lab['name']}. Prep first: " + " + ".join(parts) if parts else f"{lab['name']}. Prep done ✓"
 
 
 LF_NOISE = re.compile(
@@ -302,7 +372,29 @@ def link_goes_to_site(kind, link):
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
 
 
+def _expand_labflow(frame):
+    """Open the collapsed lab folders so their PDFs, videos and dates are on the page."""
+    try:
+        icons = frame.get_by_text("expand_more", exact=True)
+        for _ in range(30):
+            before = icons.count()
+            if not before:
+                break
+            try:
+                icons.first.click(timeout=2000)
+            except Exception:
+                break
+            frame.wait_for_timeout(300)
+            if icons.count() >= before:  # clicking didn't open anything; stop
+                break
+        frame.wait_for_timeout(1000)
+    except Exception:
+        pass
+
+
 def _read(kind, frame, tz, debug_dir=None):
+    if kind == "labflow":
+        _expand_labflow(frame)
     text = frame.inner_text("body")
     links = frame.evaluate(WEBWORK_JS) if kind == "webwork" else []
     items = parse_webwork(links, tz) if kind == "webwork" else parse_labflow(text, tz)
@@ -462,6 +554,10 @@ def fetch_sites(sites, session_file, tz, debug_dir, show_browser=False, interact
     return results, errors
 
 
+def _join(*parts):
+    return ". ".join(p for p in parts if p)
+
+
 def site_items(kind, parsed, now, days_ahead):
     """Turn parsed site assignments into (upcoming, missing) brief items.
 
@@ -478,14 +574,14 @@ def site_items(kind, parsed, now, days_ahead):
         if a["due"] >= now:
             if a["due"] <= end:
                 if a.get("opens") and a["opens"] > now:
-                    a["note"] = f"Opens {a['opens'].strftime('%a %b')} {a['opens'].day}"
+                    a["note"] = _join(f"Opens {a['opens'].strftime('%a %b')} {a['opens'].day}", a.get("note"))
                 upcoming.append(a)
         elif late and late >= now:
             if kind == "labflow":
-                a["note"] = "Late: cut-off " + late.strftime("%a %b ") + str(late.day)
+                a["note"] = _join("Late: cut-off " + late.strftime("%a %b ") + str(late.day), a.get("note"))
                 missing.append(a)
             else:
-                a["note"] = "Due date passed, reduced credit until then. Skip if you finished it"
+                a["note"] = _join("Due date passed, reduced credit until then. Skip if you finished it", a.get("note"))
                 a["due"] = late
                 upcoming.append(a)
     return upcoming, missing
