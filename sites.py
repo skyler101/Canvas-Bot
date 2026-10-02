@@ -162,8 +162,15 @@ def parse_labflow_labs(lines):
     labs, lab = [], None
     for i, line in enumerate(lines):
         nxt = lines[i + 1] if i + 1 < len(lines) else ""
-        if LF_LAB.match(line) and LF_LAB_SUMMARY.match(nxt):
-            lab = {"name": line, "pdfs": [], "videos": [], "activities": []}
+        # a lab folder heading: "Lab 5: Name" followed by (or joined with) "3 videos + ..."
+        summary_here = re.search(r"\d+ (videos?|resources?|activit)", line, re.I)
+        if LF_LAB.match(line) and (
+            summary_here or LF_LAB_SUMMARY.match(nxt)
+            or (i + 2 < len(lines) and LF_LAB_SUMMARY.match(lines[i + 2]))
+        ):
+            name = line[: summary_here.start()].strip() if summary_here else line
+            name = re.sub(r"(check_?circle)?\s*COMPLETED\s*$", "", name, flags=re.I).strip()
+            lab = {"name": name, "pdfs": [], "videos": [], "activities": []}
             labs.append(lab)
             continue
         if re.match(r"Coming Up", line, re.I):
@@ -374,19 +381,37 @@ EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
 
 def _expand_labflow(frame):
     """Open the collapsed lab folders so their PDFs, videos and dates are on the page."""
-    try:
-        icons = frame.get_by_text("expand_more", exact=True)
-        for _ in range(30):
-            before = icons.count()
-            if not before:
-                break
+
+    def has_details():
+        try:
+            return bool(re.search(r"^\s*(Video|PDF)\s*-", frame.inner_text("body"), re.M | re.I))
+        except Exception:
+            return False
+
+    def click_all(locator, limit=30):
+        for _ in range(limit):
             try:
-                icons.first.click(timeout=2000)
+                before = locator.count()
+                if not before:
+                    return
+                locator.first.click(timeout=2000)
+                frame.wait_for_timeout(300)
+                if locator.count() >= before:  # clicking didn't change anything
+                    return
             except Exception:
-                break
-            frame.wait_for_timeout(300)
-            if icons.count() >= before:  # clicking didn't open anything; stop
-                break
+                return
+
+    try:
+        click_all(frame.get_by_text("expand_more", exact=True))
+        click_all(frame.locator("[aria-expanded='false']"))
+        if not has_details():
+            # last resort: click each "Lab N: ..." folder heading once
+            heads = frame.get_by_text(re.compile(r"^\s*Lab \d+\s*:"))
+            for n in range(min(heads.count(), 20)):
+                try:
+                    heads.nth(n).click(timeout=1500)
+                except Exception:
+                    pass
         frame.wait_for_timeout(1000)
     except Exception:
         pass
