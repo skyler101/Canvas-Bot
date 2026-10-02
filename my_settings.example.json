@@ -1,12 +1,63 @@
 {
-  "_help": "Copy this file to my_settings.json and edit it. Keep the quotes and commas exactly like the examples.",
-
-  "hobbies": ["skiing", "hiking", "fishing"],
-
-  "quotes": [
-    {"text": "Add your own favorite quotes here.", "by": "You"}
+  "_help": "Your personal settings. Edit in Notepad; keep the quotes and commas exactly like this. Paste your two Canvas links below.",
+  "hobbies": [
+    "ice climbing in Hyalite",
+    "a bouldering session",
+    "a Bridger ridge lap",
+    "backcountry skiing",
+    "wrenching on the Bronco",
+    "editing a reel"
   ],
-
+  "quotes": [
+    {
+      "text": "The best climber in the world is the one who's having the most fun.",
+      "by": "Alex Lowe"
+    },
+    {
+      "text": "Getting to the top is optional. Getting down is mandatory.",
+      "by": "Ed Viesturs"
+    },
+    {
+      "text": "Do nothing in haste; look well to each step; and from the beginning think what may be the end.",
+      "by": "Edward Whymper"
+    },
+    {
+      "text": "It doesn't have to be fun to be fun.",
+      "by": "Mark Twight"
+    },
+    {
+      "text": "How you climb a mountain is more important than reaching the top.",
+      "by": "Yvon Chouinard"
+    },
+    {
+      "text": "Nobody achieves anything great by being happy and cozy.",
+      "by": "Alex Honnold"
+    },
+    {
+      "text": "Mountains are not fair or unfair, they are just dangerous.",
+      "by": "Reinhold Messner"
+    },
+    {
+      "text": "The summit is what drives us, but the climb itself is what matters.",
+      "by": "Conrad Anker"
+    },
+    {
+      "text": "It is not the mountain we conquer, but ourselves.",
+      "by": "Edmund Hillary"
+    },
+    {
+      "text": "The mountains are calling and I must go.",
+      "by": "John Muir"
+    },
+    {
+      "text": "We don't rise to the level of our expectations, we fall to the level of our training.",
+      "by": "Archilochus (attributed)"
+    },
+    {
+      "text": "Because it's there.",
+      "by": "George Mallory"
+    }
+  ],
   "sites": [
     {
       "type": "webwork",
@@ -19,7 +70,6 @@
       "canvas_link": "PASTE the Canvas link you click to open Labflow"
     }
   ],
-
   "reminders": [
     {
       "match_title": "packback",

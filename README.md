@@ -20,6 +20,18 @@ run refreshes it.
 
 Delivered by **email**, **Discord**, and/or **phone push notification** (ntfy).
 
+## ⚡ Quick start (Windows)
+
+1. Download this repo (green **Code** button → **Download ZIP**), extract it, and
+   move the folder somewhere permanent, like `Documents\Canvas-Bot`.
+2. Install [Python](https://www.python.org/downloads/) (tick **Add python.exe to PATH**).
+3. Double-click **`setup_windows.bat`** and follow the prompts. It installs everything,
+   has you paste your Canvas address and WeBWorK/Labflow links, logs you in once, sets it to
+   run every time you log in, and builds your first dashboard.
+4. Optional: install [Claude Code](https://claude.com/claude-code) for the AI "Do today" plan.
+
+The rest of this page explains each piece in detail.
+
 ## 1. Connect Canvas
 
 There are three ways. If your school blocks access tokens and third-party apps

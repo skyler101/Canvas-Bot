@@ -34,6 +34,7 @@ QUOTES = [
 ]
 
 HOBBY_EMOJI = {
+    "boulder": "🧗", "ridge": "⛷️", "wrench": "🔧", "bronco": "🛻", "reel": "🎬", "edit": "🎬",
     "ski": "⛷️", "snowboard": "🏂", "hik": "🥾", "climb": "🧗", "fish": "🎣", "hunt": "🦌",
     "camp": "🏕️", "bike": "🚵", "cycl": "🚴", "run": "🏃", "gym": "🏋️", "lift": "🏋️",
     "music": "🎸", "guitar": "🎸", "game": "🎮", "photo": "📷", "read": "📚", "cook": "🍳",
@@ -58,13 +59,20 @@ def daily_pick(now, settings, here):
         # step through photos in a shuffled-looking but repeatable order
         photo = "photos/" + urlquote(photos[(day * 7) % len(photos)].name)
 
-    quotes = list(QUOTES)
+    mine = []
     for q in settings.get("quotes", []):
         if isinstance(q, dict) and q.get("text"):
-            quotes.append((q["text"], q.get("by", "")))
+            mine.append((q["text"], q.get("by", "")))
         elif isinstance(q, str) and q.strip():
-            quotes.append((q.strip(), ""))
-    text, by = quotes[(day * 11) % len(quotes)]
+            mine.append((q.strip(), ""))
+    # Your own quotes only, unless you ask for the built-in ones too
+    quotes = mine if mine and not settings.get("use_builtin_quotes") else mine + QUOTES
+    seen, unique = set(), []
+    for q in quotes:
+        if q[0].lower() not in seen:
+            seen.add(q[0].lower())
+            unique.append(q)
+    text, by = unique[(day * 11) % len(unique)]
 
     hobbies = [h for h in settings.get("hobbies", []) if isinstance(h, str) and h.strip()]
     hobby = hobbies[day % len(hobbies)].strip() if hobbies else None

@@ -70,14 +70,18 @@ DEBUG_DIR = HERE / "debug"
 
 
 def load_settings():
-    """Personal settings (sites, reminders, hobbies, quotes). Missing file = defaults."""
-    if not SETTINGS_FILE.exists():
+    """Personal settings (sites, reminders, hobbies, quotes).
+
+    Uses my_settings.json, or the example file until you've made your own copy.
+    """
+    path = SETTINGS_FILE if SETTINGS_FILE.exists() else HERE / "my_settings.example.json"
+    if not path.exists():
         return {}
     try:
-        return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except ValueError as e:
         sys.exit(
-            f"my_settings.json has a typo near line {getattr(e, 'lineno', '?')}: {e}\n"
+            f"{path.name} has a typo near line {getattr(e, 'lineno', '?')}: {e}\n"
             "Common causes: a missing comma between items, or a comma after the last item."
         )
 
