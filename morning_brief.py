@@ -65,6 +65,7 @@ SESSION_FILE = Path(
 GRADE_SNAPSHOTS = HERE / "grade_snapshots.json"
 DASHBOARD_TEMPLATE = HERE / "dashboard_template.html"
 DASHBOARD_FILE = HERE / "dashboard.html"
+GUIDES_DIR = HERE / "study_guides"
 SETTINGS_FILE = HERE / "my_settings.json"
 DEBUG_DIR = HERE / "debug"
 
@@ -1224,6 +1225,28 @@ def self_check():
         "  info  Claude Code not installed (AI plan off; everything else works)"
     )
 
+    # study guides dropped into study_guides/
+    guide_files = list(GUIDES_DIR.glob("*.html")) if GUIDES_DIR.is_dir() else []
+    if guide_files:
+        print(f"\n  Study guides in {GUIDES_DIR.name}/:")
+        try:
+            from guides import parse_guide
+
+            now = datetime.now(TZ)
+            for f in sorted(guide_files):
+                g = parse_guide(f, now)
+                if g["date"]:
+                    days = (g["date"] - now.date()).days
+                    when = "past" if days < 0 else (f"in {days} days" if days else "today")
+                    ok(f"{f.name}: {g['course'] or '?'} {g['name']} — exam {g['date']} ({when})")
+                    print(f"        units: {', '.join(g['units']) or '(none found)'}")
+                else:
+                    bad(f"{f.name}: no exam date found — add a metadata block (see study_guides/README.txt)")
+        except Exception as e:
+            bad(f"couldn't read the study guides: {e}")
+    else:
+        print(f"  info  No study guides yet. Drop your .html guides into {GUIDES_DIR.name}/")
+
     if good_sites and logged_in:
         print("\n  Now opening WeBWorK/Labflow in a visible browser so you can watch...\n")
         from sites import fetch_sites
@@ -1322,7 +1345,7 @@ def main():
     data["climb"] = climb_config(settings, now)
     try:
         from study import build_study_schedule
-        data["study"] = build_study_schedule(settings, data, now)
+        data["study"] = build_study_schedule(settings, data, now, GUIDES_DIR)
     except Exception as e:
         data["study"] = None
         print(f"Study schedule skipped: {e}", file=sys.stderr)

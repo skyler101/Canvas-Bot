@@ -11,3 +11,5 @@ debug/
 photos/*
 !photos/README.txt
 site_cache.json
+study_guides/*
+!study_guides/README.txt

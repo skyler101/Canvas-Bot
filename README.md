@@ -120,7 +120,25 @@ list); the next 6 days are collapsed underneath; each exam shows a countdown.
 Because it re-plans from today every morning, anything you don't finish rolls
 into the remaining days automatically, and it flags you when a day is overloaded.
 
-Set your exams in `my_settings.json`:
+**The easy way — drop in your study guides.** Put the `.html` guides you make in
+Claude into the `study_guides/` folder. The bot reads each one, pulls out the
+course, exam date and units, and plans backward from the date. For the most
+reliable reading, have Claude include this block near the top of each guide:
+
+```html
+<script type="application/study-guide+json">
+{ "course": "CHMY 141", "unit": "Unit 4", "exam": "Exam 2",
+  "exam_date": "2026-10-20",
+  "sections": ["4.1 Empirical formulas", "4.2 Hydrates", "4.3 Combustion"] }
+</script>
+```
+
+Without the block it still guesses from the title, an "Exam ... <Month> <day>"
+line, a "Covers ..." line, and numbered headings. Run
+`python morning_brief.py --check` to see exactly what it read from each guide.
+Your guide files stay on your computer (git ignores them).
+
+You can also set exams by hand in `my_settings.json`:
 
 ```json
 "exams": [

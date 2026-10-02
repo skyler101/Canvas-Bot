@@ -94,14 +94,28 @@ def _same_course(a, b):
     return bool(a) and bool(b) and (a in b or b in a)
 
 
-def collect_exams(settings, data, now):
-    """Exams from my_settings.json plus exam/quiz items Canvas shows, deduped."""
+def collect_exams(settings, data, now, guides_dir=None):
+    """Exams from study-guide HTML files, my_settings.json, and Canvas, deduped."""
     exams = []
+    # 1) study guides dropped into the folder (each guide = one exam)
+    if guides_dir is not None:
+        try:
+            from guides import scan_guides
+            parsed, _ = scan_guides(guides_dir, now)
+            for g in parsed:
+                exams.append({
+                    "course": g["course"], "name": g["name"], "date": g["date"],
+                    "units": g["units"], "covers": g["covers"], "url": g["url"],
+                })
+        except Exception:
+            pass
     for e in settings.get("exams", []) if isinstance(settings.get("exams"), list) else []:
         if not isinstance(e, dict):
             continue
         d = _parse_date(e.get("date"))
         if not d:
+            continue
+        if any(x["date"] == d and _same_course(x["course"], e.get("course", "")) for x in exams):
             continue
         units = e.get("units") or []
         exams.append(
@@ -206,9 +220,9 @@ def _exam_tasks(exam, now, settings, data):
     return by_offset
 
 
-def build_study_schedule(settings, data, now):
+def build_study_schedule(settings, data, now, guides_dir=None):
     """Return the study schedule: exams, a day-by-day plan, today's tasks, and a flag."""
-    exams = collect_exams(settings, data, now)
+    exams = collect_exams(settings, data, now, guides_dir)
     relevant = [e for e in exams if 0 <= (e["date"] - now.date()).days <= 21]
     if not relevant:
         return None
