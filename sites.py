@@ -12,6 +12,7 @@ it (right-click the link in Canvas -> "Copy link address").
 import re
 import sys
 import time
+from urllib.parse import urlsplit
 from datetime import datetime, timedelta
 
 # Any of these in a page's address means we've reached the site
@@ -137,29 +138,46 @@ def parse_labflow(text, tz):
 # ---------------------------------------------------------------- Browser
 
 
+def _where(context):
+    """Where each open window/frame ended up: address (without login keys) and title."""
+    seen = []
+    for page in context.pages:
+        try:
+            title = page.title()
+        except Exception:
+            title = ""
+        for frame in page.frames:
+            u = urlsplit(frame.url)
+            if u.scheme not in ("http", "https"):
+                continue
+            spot = f"{u.netloc}{u.path}"
+            if frame is page.main_frame and title:
+                spot += f' ("{title[:60]}")'
+            if spot not in seen:
+                seen.append(spot)
+    return " | ".join(seen) or "a blank page"
+
+
 def _click_new_window(context):
-    """Click Canvas's 'Load <tool> in a new window' button, wherever it is."""
+    """Click Canvas's 'Load <tool> in a new window' button (not the sentence above it)."""
     for page in context.pages:
         for frame in page.frames:
-            for finder in (
-                lambda f: f.get_by_role("button", name=NEW_WINDOW),
-                lambda f: f.get_by_role("link", name=NEW_WINDOW),
-                lambda f: f.get_by_text(NEW_WINDOW),
-            ):
-                try:
-                    target = finder(frame)
-                    if target.count() and target.first.is_visible():
-                        target.first.click()
-                        return True
-                except Exception:
-                    pass
+            try:
+                target = frame.locator("button, a, input[type=submit], [role=button]").filter(has_text=NEW_WINDOW)
+                if not target.count():
+                    target = frame.locator("input[type=submit][value*='new window' i]")
+                if target.count() and target.first.is_visible():
+                    target.first.click()
+                    return True
+            except Exception:
+                pass
     return False
 
 
 def _find_frame(context, hosts, ready, timeout):
     """Wait until some page or iframe on one of `hosts` shows text matching `ready`."""
     deadline = time.time() + timeout
-    clicks, next_click = 0, time.time() + 2
+    clicks, next_click = 0, time.time() + 1
     while time.time() < deadline:
         for page in context.pages:
             for frame in page.frames:
@@ -170,14 +188,14 @@ def _find_frame(context, hosts, ready, timeout):
                         return frame
                 except Exception:
                     pass
-        # Tools like Labflow only open in a new window: press Canvas's button
-        # (again after a while, in case the first click was too early)
-        if clicks < 3 and time.time() >= next_click:
+        # Tools like Labflow only open in a new window: press Canvas's button.
+        # A first click sometimes does nothing, so press again if no window opened.
+        if clicks < 6 and time.time() >= next_click:
             reached = any(any(h in f.url for h in hosts) for pg in context.pages for f in pg.frames)
-            if not reached and _click_new_window(context):
+            if not reached and len(context.pages) < 2 and _click_new_window(context):
                 clicks += 1
-                next_click = time.time() + 15
-        time.sleep(1)
+                next_click = time.time() + 4
+        time.sleep(0.5)
     return None
 
 
@@ -202,12 +220,14 @@ def fetch_sites(sites, session_file, tz, debug_dir, show_browser=False):
                 context = browser.new_context(storage_state=str(session_file))
                 try:
                     page = context.new_page()
-                    page.goto(site["canvas_link"], wait_until="domcontentloaded", timeout=45_000)
-                    if "/login" in page.url:
-                        raise RuntimeError("Canvas login expired. Run --login again")
-                    frame = _find_frame(context, SITE_HOSTS[kind], SITE_READY[kind], timeout=45)
+                    page.goto(site["canvas_link"], wait_until="domcontentloaded", timeout=60_000)
+                    canvas_host = urlsplit(site["canvas_link"]).netloc
+                    start = urlsplit(page.url)
+                    if start.netloc == canvas_host and start.path.startswith("/login"):
+                        raise RuntimeError("Canvas showed its login page. Run --login again")
+                    frame = _find_frame(context, SITE_HOSTS[kind], SITE_READY[kind], timeout=90)
                     if frame is None:
-                        raise RuntimeError(f"couldn't open {label} from that Canvas link")
+                        raise RuntimeError(f"couldn't read {label}. The bot ended up at: {_where(context)}")
                     if kind == "webwork":
                         results[idx] = parse_webwork(frame.evaluate(WEBWORK_JS), tz)
                     else:
