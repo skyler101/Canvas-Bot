@@ -552,6 +552,17 @@ def workload_by_day(data, now):
     return [(d, counts[d], points[d]) for d in days]
 
 
+def merge_today_tasks(study, base):
+    """One Do-today list: today's study tasks first, then the rest (deduped)."""
+    study_tasks = (study or {}).get("todayTasks", []) if isinstance(study, dict) else []
+    seen = {t["task"].strip().lower() for t in study_tasks}
+    merged = list(study_tasks)
+    for t in base or []:
+        if t.get("task", "").strip().lower() not in seen:
+            merged.append(t)
+    return merged
+
+
 def default_today(data, now):
     """A simple 'do today' list for when there's no AI plan."""
     tasks, seen = [], set()
@@ -746,6 +757,11 @@ def ai_input(data, now):
         lines.append("\nAnnouncements:")
         for a in data["announcements"]:
             lines.append(f"{a['course']}: {a['title']}")
+    sched = data.get("study")
+    if sched and sched.get("days"):
+        lines.append("\nStudy schedule already planned for today (fold these into 'today', don't duplicate):")
+        for t in sched["todayTasks"]:
+            lines.append(f"- {t['task']} (~{t['minutes']} min) [{t['why']}]")
     if data.get("hobby"):
         lines.append(f"\nToday's featured hobby (you may nod to it in the note): {data['hobby']}")
     lines.append(
@@ -915,10 +931,11 @@ def build_dashboard(data, plan, warning, now, hero):
             for a in data["announcements"]
         ],
         "plan": plan,
-        "todayTasks": plan["today"] if plan else default_today(data, now),
+        "todayTasks": merge_today_tasks(data.get("study"), plan["today"] if plan else default_today(data, now)),
         "gradeHistory": data.get("grade_history", {}),
         "gradeChanges": data.get("grade_changes", [])[:40],
         "hero": hero,
+        "study": data.get("study"),
         "climb": data.get("climb"),
         "siteErrors": data.get("site_errors", []),
     }
@@ -1303,6 +1320,12 @@ def main():
     hero = daily_pick(now, settings, HERE)
     data["hobby"] = hero["hobby"]
     data["climb"] = climb_config(settings, now)
+    try:
+        from study import build_study_schedule
+        data["study"] = build_study_schedule(settings, data, now)
+    except Exception as e:
+        data["study"] = None
+        print(f"Study schedule skipped: {e}", file=sys.stderr)
 
     plan = None
     if not args.no_ai:

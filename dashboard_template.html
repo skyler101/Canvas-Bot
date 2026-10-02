@@ -83,6 +83,32 @@ h1 { font-size: 30px; line-height: 1.2; margin: 0; letter-spacing: -.01em; text-
 .climb-timer { display: inline-flex; align-items: center; gap: 8px; background: rgba(255,255,255,.18); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,.3); border-radius: 999px; padding: 5px 14px; font-size: 15px; font-weight: 600; align-self: flex-start; }
 .climb-timer.go { background: rgba(10,125,10,.5); border-color: rgba(120,230,120,.6); }
 .climb-obj { font-size: 13px; color: rgba(255,255,255,.85); padding-left: 4px; }
+
+/* study schedule */
+#examChips { display: flex; gap: 6px; flex-wrap: wrap; }
+.exam-chip { font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; background: var(--card-2); color: var(--text-2); }
+.exam-chip.soon { background: var(--critical-soft); color: var(--critical); }
+.behind { background: var(--warning-soft); border: 1px solid var(--warning); color: var(--warning); border-radius: 10px; padding: 8px 12px; margin-bottom: 12px; font-size: 14px; }
+.sday { display: grid; grid-template-columns: 84px 1fr; gap: 14px; padding: 12px 0; border-top: 1px solid var(--border); }
+.sday:first-child { border-top: 0; }
+.sday-when { font-size: 12px; color: var(--muted); }
+.sday-when b { display: block; font-size: 14px; color: var(--text); font-weight: 650; }
+.sday-when .load { margin-top: 3px; }
+.sday-when .load.over { color: var(--critical); }
+.sday-cls { font-size: 11px; color: var(--muted); margin-top: 6px; }
+.stask { display: grid; grid-template-columns: 22px 1fr auto; gap: 9px; align-items: start; padding: 5px 0; }
+.stask.done .st-title { text-decoration: line-through; color: var(--muted); }
+.st-title a { text-decoration: none; }
+.st-title a:hover { text-decoration: underline; }
+.st-min { font-size: 12px; color: var(--muted); white-space: nowrap; }
+details.rest { margin-top: 6px; }
+details.rest > summary { cursor: pointer; color: var(--accent); font-size: 14px; padding: 8px 0; list-style: none; }
+details.rest > summary::-webkit-details-marker { display: none; }
+details.rest > summary::before { content: "▸ "; }
+details.rest[open] > summary::before { content: "▾ "; }
+.sday-sm { padding: 8px 0; border-top: 1px solid var(--border); }
+.sday-sm b { font-size: 13px; }
+.sday-sm .mini { font-size: 13px; color: var(--text-2); margin-top: 2px; }
 .icon-btn { background: rgba(0,0,0,.28); border: 1px solid rgba(255,255,255,.35); border-radius: 999px; padding: 6px 14px; cursor: pointer; color: #fff; backdrop-filter: blur(6px); white-space: nowrap; }
 .icon-btn:hover { background: rgba(0,0,0,.45); }
 .banner.soft { background: var(--warning-soft); border-color: var(--warning); }
@@ -241,6 +267,13 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 
   <div id="banner"></div>
   <section class="tiles" id="tiles" aria-label="Summary"></section>
+
+  <section class="card" id="scheduleCard" hidden>
+    <h2>📚 Study schedule <span class="right" id="examChips"></span></h2>
+    <div id="behindFlag"></div>
+    <div id="scheduleToday"></div>
+    <div id="scheduleRest"></div>
+  </section>
 
   <div class="grid">
     <div class="col">
@@ -940,8 +973,75 @@ function renderChanges() {
 }
 
 /* ---------- wiring ---------- */
+/* ---------- study schedule ---------- */
+function renderSchedule() {
+  const study = DATA.study;
+  const card = $("scheduleCard");
+  if (!study || !study.days || !study.days.some((d) => d.tasks.length)) { card.hidden = true; return; }
+  card.hidden = false;
+
+  $("examChips").replaceChildren(...(study.exams || []).map((e) => {
+    const soon = e.daysLeft <= 2;
+    const when = e.daysLeft === 0 ? "today" : e.daysLeft === 1 ? "tomorrow" : `${e.daysLeft} days`;
+    return el("span", { class: "exam-chip" + (soon ? " soon" : ""), title: e.covers || "", text: `${e.course} ${e.name}: ${when}` });
+  }));
+
+  $("behindFlag").replaceChildren();
+  if (study.behind) $("behindFlag").append(el("div", { class: "behind", text: "⚠️ " + study.behind }));
+
+  // today, expanded with checkboxes (shared done-state with Do today + climb timer)
+  const today = study.days[0];
+  const tbox = $("scheduleToday");
+  tbox.replaceChildren();
+  tbox.append(studyDayRow(today, true));
+
+  // next days, collapsed
+  const rest = study.days.slice(1).filter((d) => d.tasks.length);
+  const rbox = $("scheduleRest");
+  rbox.replaceChildren();
+  if (rest.length) {
+    const det = el("details", { class: "rest" }, el("summary", { text: `Next ${rest.length} day${rest.length === 1 ? "" : "s"}` }));
+    for (const d of rest) det.append(studyDaySmall(d));
+    rbox.append(det);
+  }
+}
+
+function studyDayRow(d, withChecks) {
+  const left = el("div", { class: "sday-when" },
+    el("b", { text: d.label }),
+    el("div", { class: "load" + (d.over ? " over" : ""), text: `${d.totalMinutes} min` }),
+    d.classes.length ? el("div", { class: "sday-cls", text: "Class: " + d.classes.join(", ") }) : null
+  );
+  const body = el("div", {});
+  d.tasks.forEach((t) => {
+    const checked = isDone(t.id);
+    const title = t.url
+      ? el("a", { href: safeUrl(t.url) || t.url, target: "_blank", rel: "noopener", text: t.text })
+      : document.createTextNode(t.text);
+    body.append(el("div", { class: "stask" + (checked ? " done" : "") },
+      withChecks
+        ? el("input", { type: "checkbox", class: "check", checked, "aria-label": t.text, onchange: (e) => setDone(t.id, e.target.checked) })
+        : el("span", { "aria-hidden": "true" }),
+      el("div", { class: "st-title" }, title),
+      el("span", { class: "st-min", text: fmtMins(t.minutes) })
+    ));
+  });
+  return el("div", { class: "sday" }, left, body);
+}
+
+function studyDaySmall(d) {
+  const row = el("div", { class: "sday-sm" }, el("b", { text: `${d.label} · ${d.totalMinutes} min` }));
+  for (const t of d.tasks) {
+    const done = isDone(t.id);
+    row.append(el("div", { class: "mini", style: done ? "text-decoration:line-through;color:var(--muted)" : "" },
+      t.url ? el("a", { href: safeUrl(t.url) || t.url, target: "_blank", rel: "noopener", text: t.text }) : t.text,
+      el("span", { class: "st-min", text: "  " + fmtMins(t.minutes) })));
+  }
+  return row;
+}
+
 function renderAll() {
-  renderHeader(); renderTiles(); renderToday(); renderFilters(); renderWorkload(); renderDue();
+  renderHeader(); renderTiles(); renderSchedule(); renderToday(); renderFilters(); renderWorkload(); renderDue();
   renderNext(); renderMissing(); renderStudy(); renderAnnouncements(); renderGrades(); renderChanges();
 }
 

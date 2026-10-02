@@ -72,6 +72,44 @@
       }
     ]
   },
+  "exams": [
+    {
+      "course": "CHMY 141",
+      "name": "Exam 2",
+      "date": "2026-10-20",
+      "units": [
+        "Unit 3",
+        "Unit 4",
+        "Unit 5"
+      ],
+      "covers": "stoichiometry, empirical formulas, nomenclature"
+    },
+    {
+      "course": "M 151",
+      "name": "Exam 2",
+      "date": "2026-10-17",
+      "units": [
+        "3.1",
+        "3.2",
+        "3.3",
+        "3.4"
+      ]
+    }
+  ],
+  "study_guides": [
+    {
+      "course": "CHMY 141",
+      "unit": "Unit 4",
+      "title": "Empirical Formulas",
+      "file": "study_guides/CHMY_141_Unit_4.html"
+    },
+    {
+      "course": "M 151",
+      "unit": "3.1",
+      "title": "Precalc 3.1",
+      "file": "study_guides/M151_3.1.html"
+    }
+  ],
   "sites": [
     {
       "type": "webwork",

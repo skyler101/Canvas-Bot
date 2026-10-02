@@ -109,6 +109,35 @@ Use `--no-ai` to skip it.
 
 Grade history needs Option A or C below; the calendar feed doesn't include grades.
 
+## Study schedule
+
+A **Study schedule** card near the top of the dashboard plans backward from each
+exam: it spreads the units across the days before it (read/notes first, then
+practice, then a full review the day before), gives the lower-grade course more
+time, and keeps each day realistic around your class times. Today's tasks show
+with checkboxes (shared with "Do today" and the climb timer, so there's one
+list); the next 6 days are collapsed underneath; each exam shows a countdown.
+Because it re-plans from today every morning, anything you don't finish rolls
+into the remaining days automatically, and it flags you when a day is overloaded.
+
+Set your exams in `my_settings.json`:
+
+```json
+"exams": [
+  {"course": "CHMY 141", "name": "Exam 2", "date": "2026-10-20",
+   "units": ["Unit 3", "Unit 4", "Unit 5"], "covers": "stoichiometry, nomenclature"}
+],
+"study_guides": [
+  {"course": "CHMY 141", "unit": "Unit 4", "title": "Empirical Formulas",
+   "file": "study_guides/CHMY_141_Unit_4.html"}
+]
+```
+
+Exams and quizzes Canvas shows for your courses are picked up automatically
+(pre-lab quizzes and homework are left out). `study_guides` links each unit's
+task to its guide file. Works without an API key (rule-based); the AI day plan,
+when on, folds these tasks in rather than making a second list.
+
 ## Your settings: WeBWorK, Labflow, reminders, hobbies, pictures
 
 Copy `my_settings.example.json` to `my_settings.json` and edit it (Notepad is fine).
