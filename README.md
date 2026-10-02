@@ -8,6 +8,8 @@ Every morning, pulls what's due from Canvas and sends you a brief:
 - 📊 Current **grades** (lowest first)
 - 🧠 Optional **AI study plan** (via Claude): what to do today, in what order, and what to study
 
+![Terminal preview](docs/preview.png)
+
 Delivered by **email**, **Discord**, and/or **phone push notification** (ntfy).
 
 ## 1. Connect Canvas
@@ -54,6 +56,23 @@ Canvas **Notifications** (Account → Notifications → email/push) for those.
 Canvas → **Account** → **Settings** → **Approved Integrations** → **+ New Access Token**.
 Set `CANVAS_BASE_URL` (e.g. `https://yourschool.instructure.com`) and `CANVAS_TOKEN`.
 This adds submission status, missing work, grades, and announcements.
+
+## AI study plan (optional)
+
+The 🧠 Study plan section is written by Claude. There are two ways to power it:
+
+- **Your Claude subscription (Pro/Max):** install [Claude Code](https://claude.com/claude-code) on the
+  same computer and log in once:
+  - Windows (PowerShell): `irm https://claude.ai/install.ps1 | iex`
+  - Mac/Linux: `curl -fsSL https://claude.ai/install.sh | bash`
+  - Then run `claude` once, log in with your Claude account, and type `/exit`.
+
+  The bot finds the `claude` command automatically. Each brief uses a small amount of your
+  plan's usage. Claude only reads the brief text; it can't run commands or touch files.
+- **API key:** set `ANTHROPIC_API_KEY` in `.env` (from console.anthropic.com, billed separately,
+  about a cent per brief). This is the only option for GitHub Actions.
+
+Use `--no-ai` to skip it.
 
 ## 2. Try it locally
 
