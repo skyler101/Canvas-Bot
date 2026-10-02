@@ -62,12 +62,12 @@
     {
       "type": "webwork",
       "course": "M 151",
-      "canvas_link": "PASTE the Canvas link you click to open WeBWorK (right-click it in Canvas, then Copy link address)"
+      "canvas_link": "PASTE the Canvas address for WeBWorK: open it from Canvas, then copy the montana.instructure.com address from the address bar (or right-click the link, Copy link address)"
     },
     {
       "type": "labflow",
       "course": "CHMY 142",
-      "canvas_link": "PASTE the Canvas link you click to open Labflow"
+      "canvas_link": "PASTE the Canvas address of the 'Labflow App' page, e.g. https://montana.instructure.com/courses/35314/modules/items/2602551"
     }
   ],
   "reminders": [

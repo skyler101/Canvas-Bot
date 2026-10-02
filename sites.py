@@ -14,7 +14,9 @@ import sys
 import time
 from datetime import datetime, timedelta
 
-SITE_HOSTS = {"webwork": "webwork", "labflow": "catalystedu.com"}
+# Any of these in a page's address means we've reached the site
+SITE_HOSTS = {"webwork": ("webwork",), "labflow": ("catalystedu.com", "labflow.com")}
+NEW_WINDOW = re.compile(r"in a new (browser )?(window|tab)", re.I)
 SITE_READY = {
     "webwork": re.compile(r"\bDue\b|Will open|Answers available|Closed", re.I),
     "labflow": re.compile(r"\b(Opened|Opens|Closes|Closed)\s+\d\d/\d\d/\d{4}", re.I),
@@ -135,30 +137,46 @@ def parse_labflow(text, tz):
 # ---------------------------------------------------------------- Browser
 
 
-def _find_frame(context, host, ready, timeout):
-    """Wait until some page or iframe on `host` shows text matching `ready`."""
+def _click_new_window(context):
+    """Click Canvas's 'Load <tool> in a new window' button, wherever it is."""
+    for page in context.pages:
+        for frame in page.frames:
+            for finder in (
+                lambda f: f.get_by_role("button", name=NEW_WINDOW),
+                lambda f: f.get_by_role("link", name=NEW_WINDOW),
+                lambda f: f.get_by_text(NEW_WINDOW),
+            ):
+                try:
+                    target = finder(frame)
+                    if target.count() and target.first.is_visible():
+                        target.first.click()
+                        return True
+                except Exception:
+                    pass
+    return False
+
+
+def _find_frame(context, hosts, ready, timeout):
+    """Wait until some page or iframe on one of `hosts` shows text matching `ready`."""
     deadline = time.time() + timeout
-    clicked_new_window = False
+    clicks, next_click = 0, time.time() + 2
     while time.time() < deadline:
         for page in context.pages:
             for frame in page.frames:
-                if host not in frame.url:
+                if not any(h in frame.url for h in hosts):
                     continue
                 try:
                     if ready.search(frame.inner_text("body", timeout=2000)):
                         return frame
                 except Exception:
                     pass
-        # Some Canvas tools only open in a new tab: click Canvas's "Load in a new window" button
-        if not clicked_new_window:
-            for page in context.pages:
-                try:
-                    btn = page.get_by_role("button", name=re.compile("new window", re.I))
-                    if btn.count() and btn.first.is_visible():
-                        btn.first.click()
-                        clicked_new_window = True
-                except Exception:
-                    pass
+        # Tools like Labflow only open in a new window: press Canvas's button
+        # (again after a while, in case the first click was too early)
+        if clicks < 3 and time.time() >= next_click:
+            reached = any(any(h in f.url for h in hosts) for pg in context.pages for f in pg.frames)
+            if not reached and _click_new_window(context):
+                clicks += 1
+                next_click = time.time() + 15
         time.sleep(1)
     return None
 

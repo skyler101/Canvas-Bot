@@ -436,10 +436,13 @@ def collect_from_ics(now):
 
 def match_course(label, data):
     """Map a label like 'M 151' to the Canvas course name, so colors line up."""
-    key = re.sub(r"\s+", "", label or "").lower()
+    def squash(t):  # "CHMY 142" and "CHMY_142_521_202670" both become "chmy142..."
+        return re.sub(r"[^a-z0-9]", "", (t or "").lower())
+
+    key = squash(label)
     names = {c["name"] for c in data["courses"].values()} | {a["course"] for a in data["upcoming"]}
     for n in sorted(names):
-        if key and key in re.sub(r"\s+", "", n).lower():
+        if key and key in squash(n):
             return n
     return label or ""
 
