@@ -828,6 +828,50 @@ def ai_study_plan(data, now):
 # ---------------------------------------------------------------- Dashboard
 
 
+DAY_NAMES = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+
+
+def _parse_hhmm(text, now):
+    """'14:30' or '2:30 PM' -> a datetime today, or None."""
+    text = str(text or "").strip()
+    for fmt in ("%H:%M", "%I:%M %p", "%I %p", "%I:%M%p"):
+        try:
+            t = datetime.strptime(text.upper(), fmt).time()
+            return now.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
+        except ValueError:
+            continue
+    return None
+
+
+def climb_config(settings, now):
+    """Config for the hero climb timer: whether to show it, the next objective,
+    and today's busy windows (class times etc.) so the timer can skip over them."""
+    today_idx = now.weekday()
+    busy = []
+    sched = settings.get("schedule") or {}
+    entries = sched.get("classes", []) if isinstance(sched, dict) else []
+    for e in entries if isinstance(entries, list) else []:
+        if not isinstance(e, dict):
+            continue
+        days = str(e.get("days", "")).lower()
+        hit = any(name in days and DAY_NAMES[name] == today_idx for name in DAY_NAMES)
+        start, end = _parse_hhmm(e.get("start"), now), _parse_hhmm(e.get("end"), now)
+        if hit and start and end and end > start:
+            busy.append({"start": start.isoformat(), "end": end.isoformat(), "label": e.get("name", "Class")})
+    busy.sort(key=lambda b: b["start"])
+
+    obj = settings.get("next_objective")
+    objective = None
+    if isinstance(obj, dict) and obj.get("name") and obj.get("date"):
+        objective = {"name": obj["name"], "date": obj["date"]}
+
+    return {
+        "show": bool(settings.get("show_climb_timer", True)),
+        "objective": objective,
+        "busyToday": busy,
+    }
+
+
 def build_dashboard(data, plan, warning, now, hero):
     """Write dashboard.html: the template with this run's data embedded."""
     courses = sorted(
@@ -875,6 +919,7 @@ def build_dashboard(data, plan, warning, now, hero):
         "gradeHistory": data.get("grade_history", {}),
         "gradeChanges": data.get("grade_changes", [])[:40],
         "hero": hero,
+        "climb": data.get("climb"),
         "siteErrors": data.get("site_errors", []),
     }
     blob = json.dumps(payload, ensure_ascii=False)
@@ -1257,6 +1302,7 @@ def main():
 
     hero = daily_pick(now, settings, HERE)
     data["hobby"] = hero["hobby"]
+    data["climb"] = climb_config(settings, now)
 
     plan = None
     if not args.no_ai:

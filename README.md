@@ -128,7 +128,13 @@ Copy `my_settings.example.json` to `my_settings.json` and edit it (Notepad is fi
 - **Reminders**: extra to-dos based on Canvas items. The example adds "Post your
   Packback discussion question" one day before any Packback assignment in GPHY.
   Change `match_course` to your course code as it appears on the dashboard.
-- **Hobbies**: one is featured each day as your reward for finishing your list.
+- **Climb timer**: the hero banner shows a live countdown to when you're free to
+  climb — now plus the time estimates of your unticked "Do today" items, skipping
+  over any class times in `schedule`. It flips to "🧗 Go climb." when the list is
+  done. Set `"show_climb_timer": false` to hide it. Add `next_objective`
+  (`name` + `date`) for a days-remaining line like "Hyalite ice season: 61 days".
+- **Schedule**: list your weekly `classes` (name, days, start, end) so the climb
+  timer works around them.
 - **Pictures**: drop your own photos (mountains, hobbies…) into the `photos/`
   folder and a different one shows each day. With none, the dashboard draws a new
   mountain scene every day. **Quotes** rotate daily; add your own in settings.

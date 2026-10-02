@@ -1,13 +1,10 @@
 {
   "_help": "Your personal settings. Edit in Notepad; keep the quotes and commas exactly like this. Paste your two Canvas links below.",
-  "hobbies": [
-    "ice climbing in Hyalite",
-    "a bouldering session",
-    "a Bridger ridge lap",
-    "backcountry skiing",
-    "wrenching on the Bronco",
-    "editing a reel"
-  ],
+  "show_climb_timer": true,
+  "next_objective": {
+    "name": "Hyalite ice season",
+    "date": "2026-12-01"
+  },
   "quotes": [
     {
       "text": "The best climber in the world is the one who's having the most fun.",
@@ -58,6 +55,23 @@
       "by": "George Mallory"
     }
   ],
+  "schedule": {
+    "_note": "Your weekly class/work times, so the climb timer skips over them.",
+    "classes": [
+      {
+        "name": "M 151 lecture",
+        "days": "mon wed fri",
+        "start": "09:00",
+        "end": "09:50"
+      },
+      {
+        "name": "CHMY 142 lab",
+        "days": "tue",
+        "start": "14:00",
+        "end": "16:50"
+      }
+    ]
+  },
   "sites": [
     {
       "type": "webwork",
