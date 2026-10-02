@@ -1239,7 +1239,12 @@ def self_check():
                     days = (g["date"] - now.date()).days
                     when = "past" if days < 0 else (f"in {days} days" if days else "today")
                     ok(f"{f.name}: {g['course'] or '?'} {g['name']} — exam {g['date']} ({when})")
-                    print(f"        units: {', '.join(g['units']) or '(none found)'}")
+                    from study import unit_parts
+                    bits = []
+                    for u in g["units"]:
+                        label, mins = unit_parts(u)
+                        bits.append(f"{label} ({mins} min)" if mins is not None else label)
+                    print(f"        units: {', '.join(bits) or '(none found)'}")
                 else:
                     bad(f"{f.name}: no exam date found — add a metadata block (see study_guides/README.txt)")
         except Exception as e:

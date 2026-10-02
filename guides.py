@@ -136,9 +136,13 @@ def parse_guide(path, now=None):
     # if the parsed date already passed this year, assume next occurrence isn't our job —
     # leave it; the scheduler only shows exams within its window
 
-    sections = meta.get("sections") or [_text(s) for s in SECTION_RE.findall(html)]
-    sections = [s for s in sections if s]
-    units = _group_sections(sections, unit)
+    if meta.get("sections"):
+        # metadata sections pass through as-is (string, or {"topic","minutes"})
+        units = [u for u in meta["sections"] if (isinstance(u, dict) and u.get("topic")) or (isinstance(u, str) and u.strip())]
+    else:
+        sections = [_text(s) for s in SECTION_RE.findall(html)]
+        sections = [s for s in sections if s]
+        units = _group_sections(sections, unit)
     if not meta.get("sections") and (len(units) > 8 or len(units) <= 2):
         covers_text = ""
         for span in re.findall(r'class="fact"[^>]*>(.*?)</span>', html, re.I | re.S):
@@ -152,7 +156,9 @@ def parse_guide(path, now=None):
         parts = [u.strip() for u in re.split(r"[;,]", covers_text) if u.strip()]
         if len(parts) >= 3:
             units = parts[:12]
-    covers = meta.get("covers") or (", ".join(units) if units else "")
+    def _label(u):
+        return u.get("topic") or u.get("title") or u.get("unit") or "" if isinstance(u, dict) else str(u)
+    covers = meta.get("covers") or (", ".join(_label(u) for u in units) if units else "")
 
     return {
         "course": course,

@@ -129,11 +129,15 @@ reliable reading, have Claude include this block near the top of each guide:
 <script type="application/study-guide+json">
 { "course": "CHMY 141", "unit": "Unit 4", "exam": "Exam 2",
   "exam_date": "2026-10-20",
-  "sections": ["4.1 Empirical formulas", "4.2 Hydrates", "4.3 Combustion"] }
+  "sections": [
+    "4.1 Empirical formulas",
+    {"topic": "4.3 Combustion analysis", "minutes": 60}
+  ] }
 </script>
 ```
 
-Without the block it still guesses from the title, an "Exam ... <Month> <day>"
+Each section is either a plain string (default study time) or
+`{"topic": "...", "minutes": N}` to give that topic more or less time. Without the block it still guesses from the title, an "Exam ... <Month> <day>"
 line, a "Covers ..." line, and numbered headings. Run
 `python morning_brief.py --check` to see exactly what it read from each guide.
 Your guide files stay on your computer (git ignores them).

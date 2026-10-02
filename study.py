@@ -172,6 +172,19 @@ def _guide_for(course, unit, settings):
     return None
 
 
+def unit_parts(u):
+    """Normalize a unit entry -> (label, minutes_override|None)."""
+    if isinstance(u, dict):
+        label = str(u.get("topic") or u.get("title") or u.get("unit") or "").strip()
+        mins = u.get("minutes")
+        try:
+            mins = int(mins) if mins is not None else None
+        except (TypeError, ValueError):
+            mins = None
+        return label or "the material", mins
+    return str(u), None
+
+
 def _exam_tasks(exam, now, settings, data):
     """Backward plan for one exam: {offset_days_from_today: [task,...]}."""
     today = now.date()
@@ -184,13 +197,13 @@ def _exam_tasks(exam, now, settings, data):
     units = exam["units"] or ["the material"]
     by_offset = {}
 
-    def add(offset, text, minutes, unit=None):
+    def add(offset, text, minutes, unit=None, scale=True):
         guide = _guide_for(exam["course"], unit or "", settings)
         by_offset.setdefault(offset, []).append(
             {
                 "course": code,
                 "text": text,
-                "minutes": int(round(minutes * factor)),
+                "minutes": int(round(minutes * factor)) if scale else int(round(minutes)),
                 "url": (guide or {}).get("url") or url,
                 "exam": f"{code} {exam['name']}",
             }
@@ -204,15 +217,16 @@ def _exam_tasks(exam, now, settings, data):
     # one "new material" task and one "practice" task per unit, spread in order
     unit_tasks = []
     for u in units:
-        label = u if re.search(r"\d", u) or u == "the material" else f"{u}"
-        unit_tasks.append(("new", label))
-        unit_tasks.append(("practice", label))
-    for i, (kind, unit) in enumerate(unit_tasks):
+        label, override = unit_parts(u)
+        unit_tasks.append(("new", label, override))
+        unit_tasks.append(("practice", label, override))
+    for i, (kind, label, override) in enumerate(unit_tasks):
         offset = work_offsets[i % len(work_offsets)]
         if kind == "new":
-            add(offset, f"{code} {unit} — read the guide / notes", NEW_MATERIAL_MIN, unit)
+            mins = override if override is not None else NEW_MATERIAL_MIN
+            add(offset, f"{code} {label} — read the guide / notes", mins, label, scale=override is None)
         else:
-            add(offset, f"{code} {unit} — practice problems", PRACTICE_MIN, unit)
+            add(offset, f"{code} {label} — practice problems", PRACTICE_MIN, label)
 
     if days_until >= 1:
         covers = f" (all units)" if len(units) > 1 else ""
@@ -280,7 +294,7 @@ def build_study_schedule(settings, data, now, guides_dir=None):
             "name": e["name"],
             "date": e["date"].isoformat(),
             "daysLeft": (e["date"] - now.date()).days,
-            "covers": e["covers"] or (", ".join(e["units"]) if e["units"] else ""),
+            "covers": e["covers"] or ", ".join(unit_parts(u)[0] for u in e["units"]) if e["units"] else e["covers"],
         }
         for e in relevant
     ]
