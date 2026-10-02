@@ -1157,8 +1157,29 @@ def self_check():
             good_sites, SESSION_FILE, TZ, DEBUG_DIR, show_browser=True, interactive=True,
             cache_file=HERE / "site_cache.json",
         )
-        for idx, items in results.items():
-            ok(f"{good_sites[idx]['type']}: read {len(items)} assignments")
+        from sites import EMAIL, site_items
+
+        for idx, site in enumerate(good_sites):
+            kind = site["type"].lower()
+            items = results.get(idx, [])
+            print()
+            (ok if items else bad)(f"{kind}: understood {len(items)} assignments on the page")
+            for a in items[:15]:
+                fmt = lambda d: f"{d.strftime('%b')} {d.day} {fmt_clock(d)}" if d else "-"
+                print(f"        {'DONE ' if a.get('done') else ''}{a['title']} | due {fmt(a['due'])}"
+                      + (f" | late until {fmt(a['late_until'])}" if a.get("late_until") else ""))
+            if items:
+                up, miss = site_items(kind, [dict(a) for a in items], datetime.now(TZ), DAYS_AHEAD)
+                print(f"        -> {len(up)} due in the next {DAYS_AHEAD} days, {len(miss)} late/missing (these go on the dashboard)")
+            seen = DEBUG_DIR / f"{kind}-seen.txt"
+            if not any(a.get("due") for a in items) and seen.exists():
+                lines = [l.strip() for l in seen.read_text(encoding="utf-8").splitlines() if l.strip()]
+                key = re.compile(r"page:|set links|LINK|Due|Open|Close|Cut-?Off|answers|Opens|Closes|Coming", re.I)
+                print("        What the bot saw (key lines):")
+                for l in [l for l in lines if key.search(l)][:30]:
+                    print(f"          {EMAIL.sub('[email]', l)[:150]}")
+                print(f"        Full text: {seen}")
+        print()
         for e in errors:
             bad(e)
         if errors:

@@ -45,7 +45,9 @@ WEBWORK_JS = """() => {
 
 
 def _parse_dt(s, tz, formats):
-    s = re.sub(r"\s+", " ", s.replace(",", " ").replace(" at ", " ")).strip()
+    s = s.replace(",", " ").replace(" at ", " ").replace(".", "")
+    s = re.sub(r"(\d)\s*([AaPp][Mm])\b", lambda m: f"{m.group(1)} {m.group(2).upper()}", s)
+    s = re.sub(r"\s+", " ", s).strip()
     for fmt in formats:
         try:
             return datetime.strptime(s, fmt).replace(tzinfo=tz)
@@ -54,8 +56,16 @@ def _parse_dt(s, tz, formats):
     return None
 
 
-WW_DATE = r"([A-Z][a-z]+ \d{1,2}, \d{4},? (?:at )?\d{1,2}:\d{2}(?::\d{2})? ?[AP]M)"
-WW_FORMATS = ["%B %d %Y %I:%M:%S %p", "%B %d %Y %I:%M %p", "%b %d %Y %I:%M:%S %p", "%b %d %Y %I:%M %p"]
+# "October 1, 2026, 11:59:00 PM", "Oct 1, 2026 at 11:59 PM" or "10/01/2026 at 11:59pm"
+WW_DATE = (
+    r"((?:[A-Z][a-z]+\.? \d{1,2},? \d{4}|\d{1,2}/\d{1,2}/\d{2,4}),?\s+(?:at\s+)?"
+    r"\d{1,2}:\d{2}(?::\d{2})?\s*[AaPp]\.?[Mm]\.?)"
+)
+WW_FORMATS = [
+    f"{d} {t}"
+    for d in ("%B %d %Y", "%b %d %Y", "%m/%d/%Y", "%m/%d/%y")
+    for t in ("%I:%M:%S %p", "%I:%M %p")
+]
 
 
 def parse_webwork(sets, tz):
@@ -66,9 +76,9 @@ def parse_webwork(sets, tz):
         if not name or name in seen or name.lower().startswith("download"):
             continue
         seen.add(name)
-        due = re.search(r"\bDue (?:on )?" + WW_DATE, text)
+        due = re.search(r"\b(?:Due|Closes)(?: on)?:? " + WW_DATE, text, re.I)
         reduced = re.search(r"reduced credit[^.]*?until " + WW_DATE, text, re.I)
-        opens = re.search(r"(?:Will open|Opens) (?:on )?" + WW_DATE, text, re.I)
+        opens = re.search(r"(?:Will open|Opens)(?: on)?:? " + WW_DATE, text, re.I)
         item = {
             "title": name.replace("_", " "),
             "due": _parse_dt(due.group(1), tz, WW_FORMATS) if due else None,
@@ -256,10 +266,26 @@ def _find_frame(context, hosts, ready, timeout, stop_at_login=True):
     return None, "timeout"
 
 
-def _read(kind, frame, tz):
-    if kind == "webwork":
-        return parse_webwork(frame.evaluate(WEBWORK_JS), tz)
-    return parse_labflow(frame.inner_text("body"), tz)
+EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
+
+
+def _read(kind, frame, tz, debug_dir=None):
+    text = frame.inner_text("body")
+    links = frame.evaluate(WEBWORK_JS) if kind == "webwork" else []
+    items = parse_webwork(links, tz) if kind == "webwork" else parse_labflow(text, tz)
+    if debug_dir is not None:
+        # What the bot saw, for troubleshooting (stays on your computer; emails removed)
+        try:
+            debug_dir.mkdir(exist_ok=True)
+            u = urlsplit(frame.url)
+            dump = [f"page: {u.netloc}{u.path}", f"set links found: {len(links)}" if kind == "webwork" else ""]
+            for l in links[:40]:
+                dump.append(f"LINK {l['name']!r}: {' '.join(l['text'].split())[:160]}")
+            dump += ["", "--- page text ---", text[:20000]]
+            (debug_dir / f"{kind}-seen.txt").write_text(EMAIL.sub("[email]", "\n".join(dump)), encoding="utf-8")
+        except Exception:
+            pass
+    return items
 
 
 def _cache_key(site):
@@ -299,7 +325,7 @@ def _save_cache(cache_file, cache):
         pass
 
 
-def _sign_in_window(p, site, kind, label, session_file, tz):
+def _sign_in_window(p, site, kind, label, session_file, tz, debug_dir=None):
     """Open a visible browser so you can sign in (NetID + Duo); read the site once you're in."""
     browser = p.chromium.launch(headless=False)
     try:
@@ -319,7 +345,7 @@ def _sign_in_window(p, site, kind, label, session_file, tz):
         frame, _ = _find_frame(context, SITE_HOSTS[kind], SITE_READY[kind], timeout=240, stop_at_login=False)
         if frame is None:
             return None
-        items = _read(kind, frame, tz)
+        items = _read(kind, frame, tz, debug_dir)
         context.storage_state(path=str(session_file))  # keep the sign-in for next time
         return items
     finally:
@@ -358,13 +384,13 @@ def fetch_sites(sites, session_file, tz, debug_dir, show_browser=False, interact
                         raise RuntimeError("Canvas showed its login page. Run --login again")
                     frame, reason = _find_frame(context, SITE_HOSTS[kind], SITE_READY[kind], timeout=90)
                     if frame is not None:
-                        results[idx] = _read(kind, frame, tz)
+                        results[idx] = _read(kind, frame, tz, debug_dir)
                         context.storage_state(path=str(session_file))
                     elif reason == "login":
                         context.close()
                         context = None
                         if interactive:
-                            items = _sign_in_window(p, site, kind, label, session_file, tz)
+                            items = _sign_in_window(p, site, kind, label, session_file, tz, debug_dir)
                             if items is not None:
                                 results[idx] = items
                             else:
