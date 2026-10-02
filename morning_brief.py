@@ -3,6 +3,8 @@
 Usage:
     python morning_brief.py            # build the brief, print it, and deliver it
     python morning_brief.py --dry-run  # build and print only, skip delivery
+    python morning_brief.py --login    # log in to Canvas in a browser window once,
+                                       # so the script can reuse your session
 
 Configuration comes from environment variables (or a .env file); see .env.example.
 """
@@ -10,18 +12,23 @@ Configuration comes from environment variables (or a .env file); see .env.exampl
 import argparse
 import os
 import re
+import json
 import smtplib
 import sys
+from pathlib import Path
+from urllib.parse import urlencode
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from zoneinfo import ZoneInfo
 
 import requests
 
+HERE = Path(__file__).resolve().parent
+
 try:
     from dotenv import load_dotenv
 
-    load_dotenv()
+    load_dotenv(HERE / ".env")
 except ImportError:
     pass
 
@@ -32,25 +39,53 @@ CANVAS_ICS_URL = os.environ.get("CANVAS_ICS_URL", "")
 TZ = ZoneInfo(os.environ.get("TIMEZONE", "America/New_York"))
 DAYS_AHEAD = int(os.environ.get("DAYS_AHEAD", "7"))
 CLAUDE_MODEL = "claude-opus-5-5"
+# Saved browser login (cookies) for --login mode. Anyone with this file is
+# logged in as you, so it lives outside the repo by default.
+SESSION_FILE = Path(
+    os.environ.get("CANVAS_SESSION_FILE", Path.home() / ".canvas-bot" / "session.json")
+)
+
+
+class LoginExpired(Exception):
+    pass
 
 
 # ---------------------------------------------------------------- Canvas API
 
 
+_browser_api = None  # Playwright request context when using a saved browser login
+
+
+def _http_get(url):
+    """GET a URL with whichever auth is configured; returns (status, headers, text)."""
+    if _browser_api is not None:
+        resp = _browser_api.get(url, max_redirects=0, timeout=30_000)
+        return resp.status, resp.headers, resp.text()
+    resp = requests.get(
+        url, headers={"Authorization": f"Bearer {CANVAS_TOKEN}"}, timeout=30, allow_redirects=False
+    )
+    return resp.status_code, resp.headers, resp.text
+
+
 def canvas_get(path, params=None):
     """GET a Canvas API endpoint and follow pagination (Link: rel="next")."""
     url = f"{CANVAS_BASE_URL}/api/v1{path}"
-    headers = {"Authorization": f"Bearer {CANVAS_TOKEN}"}
+    if params:
+        url += "?" + urlencode(params, doseq=True)
     results = []
     while url:
-        resp = requests.get(url, headers=headers, params=params, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
+        status, headers, text = _http_get(url)
+        if status in (301, 302, 303, 401):
+            raise LoginExpired(f"Canvas returned {status} for {path}")
+        if status >= 400:
+            raise RuntimeError(f"Canvas API error {status} for {path}: {text[:200]}")
+        # Cookie-authenticated API responses are prefixed to block JSON hijacking
+        data = json.loads(text.removeprefix("while(1);"))
         if not isinstance(data, list):
             return data
         results.extend(data)
-        url = resp.links.get("next", {}).get("url")
-        params = None  # the "next" URL already carries the query string
+        links = requests.utils.parse_header_links(headers.get("link", "") or "")
+        url = next((l["url"] for l in links if l.get("rel") == "next"), None)
     return results
 
 
@@ -109,10 +144,19 @@ def parse_time(s):
     return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(TZ) if s else None
 
 
+def fmt_day(dt, weekday="%a"):
+    """'Thu Oct 2' — built by hand because %-d isn't supported on Windows."""
+    return f"{dt.strftime(weekday + ' %b')} {dt.day}"
+
+
+def fmt_clock(dt):
+    return f"{dt.hour % 12 or 12}:{dt.minute:02d} {dt.strftime('%p')}"
+
+
 def fmt_due(dt, now):
     days = (dt.date() - now.date()).days
-    when = {0: "Today", 1: "Tomorrow"}.get(days, dt.strftime("%a %b %-d"))
-    return f"{when} {dt.strftime('%-I:%M %p')}"
+    when = {0: "Today", 1: "Tomorrow"}.get(days, fmt_day(dt))
+    return f"{when} {fmt_clock(dt)}"
 
 
 def collect(now):
@@ -222,12 +266,12 @@ def collect_from_ics(now):
 
 
 def render_plain(data, now):
-    lines = [f"# Morning Brief — {now.strftime('%A, %B %-d')}", ""]
+    lines = [f"# Morning Brief — {now.strftime('%A, %B')} {now.day}", ""]
 
     if data["missing"]:
         lines.append(f"## ⚠️ Missing ({len(data['missing'])})")
         for a in data["missing"]:
-            due = f" (was due {a['due'].strftime('%b %-d')})" if a["due"] else ""
+            due = f" (was due {a['due'].strftime('%b')} {a['due'].day})" if a["due"] else ""
             lines.append(f"- **{a['course']}** — {a['title']}{due}")
         lines.append("")
 
@@ -263,7 +307,7 @@ def ai_study_plan(plain_brief, now):
 
     client = anthropic.Anthropic()
     prompt = (
-        f"It is {now.strftime('%A %B %-d, %-I:%M %p')}. Below is my Canvas data for the "
+        f"It is {fmt_day(now, '%A')}, {fmt_clock(now)}. Below is my Canvas data for the "
         "coming week. Write a short morning brief for a student:\n"
         "1. A 2-sentence overview of the week.\n"
         "2. 'Today's plan': a prioritized list of what to work on today, with rough "
@@ -285,6 +329,47 @@ def ai_study_plan(plain_brief, now):
     if response.stop_reason == "refusal":
         return None
     return "".join(b.text for b in response.content if b.type == "text").strip() or None
+
+
+# ---------------------------------------------------------------- Browser login
+
+
+def browser_login():
+    """Open a real browser so you can log in (SSO, Duo, etc.), then save the session."""
+    from playwright.sync_api import sync_playwright
+
+    if not CANVAS_BASE_URL:
+        sys.exit("Set CANVAS_BASE_URL in .env first (e.g. https://yourschool.instructure.com).")
+    SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        context = browser.new_context()
+        page = context.new_page()
+        page.goto(CANVAS_BASE_URL)
+        print(
+            "A browser window opened. Log in to Canvas as usual (check 'remember me' /\n"
+            "'stay signed in' if offered). When you can see your Canvas dashboard,\n"
+            "come back here and press Enter."
+        )
+        input()
+        resp = context.request.get(f"{CANVAS_BASE_URL}/api/v1/users/self", max_redirects=0)
+        if resp.status != 200:
+            browser.close()
+            sys.exit("Doesn't look logged in yet (Canvas said %d). Try again." % resp.status)
+        me = json.loads(resp.text().removeprefix("while(1);"))
+        context.storage_state(path=str(SESSION_FILE))
+        browser.close()
+    try:
+        SESSION_FILE.chmod(0o600)
+    except OSError:
+        pass
+    print(f"✓ Logged in as {me.get('name')}. Session saved to {SESSION_FILE}")
+
+
+def open_browser_session(playwright):
+    global _browser_api
+    _browser_api = playwright.request.new_context(storage_state=str(SESSION_FILE))
+    return _browser_api
 
 
 # ---------------------------------------------------------------- Delivery
@@ -339,19 +424,53 @@ def send_ntfy(title, body):
 # ---------------------------------------------------------------- Main
 
 
+def build_brief(now):
+    """Collect data using the best available source, and return the plain brief."""
+    if CANVAS_BASE_URL and CANVAS_TOKEN:
+        return render_plain(collect(now), now)
+
+    if CANVAS_BASE_URL and SESSION_FILE.exists():
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as p:
+            api = open_browser_session(p)
+            try:
+                data = collect(now)
+                api.storage_state(path=str(SESSION_FILE))  # keep refreshed cookies
+                return render_plain(data, now)
+            except LoginExpired:
+                warning = (
+                    "⚠️ **Canvas login expired.** On your computer, run "
+                    "`python morning_brief.py --login` to log in again.\n\n"
+                )
+                if not CANVAS_ICS_URL:
+                    return warning
+                print("Canvas login expired; falling back to calendar feed", file=sys.stderr)
+                return warning + render_plain(collect_from_ics(now), now)
+            finally:
+                api.dispose()
+
+    if CANVAS_ICS_URL:
+        return render_plain(collect_from_ics(now), now)
+
+    sys.exit(
+        "No Canvas source configured. Either run `python morning_brief.py --login`, "
+        "or set CANVAS_ICS_URL / CANVAS_TOKEN (see .env.example)."
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="print only, don't deliver")
+    parser.add_argument("--login", action="store_true", help="log in to Canvas in a browser")
     args = parser.parse_args()
 
+    if args.login:
+        browser_login()
+        return
+
     now = datetime.now(TZ)
-    if CANVAS_BASE_URL and CANVAS_TOKEN:
-        data = collect(now)
-    elif CANVAS_ICS_URL:
-        data = collect_from_ics(now)
-    else:
-        sys.exit("Set CANVAS_ICS_URL, or CANVAS_BASE_URL + CANVAS_TOKEN (see .env.example).")
-    plain = render_plain(data, now)
+    plain = build_brief(now)
 
     brief = plain
     if os.environ.get("ANTHROPIC_API_KEY"):
@@ -363,12 +482,11 @@ def main():
             print(f"AI study plan skipped: {e}", file=sys.stderr)
 
     print(brief)
-    with open("brief.md", "w", encoding="utf-8") as f:
-        f.write(brief)
+    (HERE / "brief.md").write_text(brief, encoding="utf-8")
 
     if args.dry_run:
         return
-    subject = f"Morning Brief — {now.strftime('%a %b %-d')}"
+    subject = f"Morning Brief — {fmt_day(now)}"
     send_email(subject, brief)
     send_discord(brief)
     send_ntfy(subject, brief)

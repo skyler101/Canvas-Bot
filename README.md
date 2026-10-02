@@ -12,7 +12,33 @@ Delivered by **email**, **Discord**, and/or **phone push notification** (ntfy).
 
 ## 1. Connect Canvas
 
-### Option A — Calendar Feed (works even if access tokens are greyed out)
+There are three ways. If your school blocks access tokens and third-party apps
+(the "New Access Token" button is greyed out), use **Option A**.
+
+### Option A — Your own browser login (full data, no token needed) ⭐
+
+The script opens a normal browser window, you log in once (SSO, Duo, all of
+it), and it saves that login to reuse every morning. It reads the same data
+the Canvas website shows you, so you get everything: what's due, what you've
+already submitted, missing work, grades, and announcements.
+
+```bash
+pip install -r requirements.txt
+python -m playwright install chromium   # one-time browser download
+# put CANVAS_BASE_URL=https://yourschool.instructure.com in .env
+python morning_brief.py --login
+```
+
+- The saved login lives at `~/.canvas-bot/session.json`. **Anyone with that file
+  is logged in as you**, so never commit, share, or upload it.
+- Your school decides how long a login lasts. When it runs out, the brief tells
+  you to run `--login` again. If you also set `CANVAS_ICS_URL`, you still get
+  due dates in the meantime.
+- It only *reads* your own data, a handful of requests a day (less than opening
+  Canvas once). Still, check your school's IT acceptable-use policy.
+- This option runs on **your computer** (see step 3b), not GitHub Actions.
+
+### Option B — Calendar Feed (works even if access tokens are greyed out)
 
 1. Open Canvas → **Calendar** (left sidebar)
 2. At the bottom of the right-hand column, click **Calendar Feed**
@@ -23,7 +49,7 @@ The feed has every assignment/quiz due date and class event, but **not** whether
 you've submitted something, missing work, grades, or announcements. Turn on
 Canvas **Notifications** (Account → Notifications → email/push) for those.
 
-### Option B — Access token (more detail, if your school allows it)
+### Option C — Access token (more detail, if your school allows it)
 
 Canvas → **Account** → **Settings** → **Approved Integrations** → **+ New Access Token**.
 Set `CANVAS_BASE_URL` (e.g. `https://yourschool.instructure.com`) and `CANVAS_TOKEN`.
@@ -37,7 +63,7 @@ cp .env.example .env      # fill in CANVAS_ICS_URL (or CANVAS_BASE_URL + CANVAS_
 python morning_brief.py --dry-run
 ```
 
-## 3. Run it automatically every morning (free, via GitHub Actions)
+## 3a. Run it every morning in the cloud (calendar feed / token only)
 
 1. In this repo on GitHub: **Settings → Secrets and variables → Actions**
 2. Add **secrets**: `CANVAS_ICS_URL` (or `CANVAS_BASE_URL` + `CANVAS_TOKEN`), plus any delivery ones you want:
@@ -51,3 +77,24 @@ python morning_brief.py --dry-run
 5. Test: **Actions → Morning Brief → Run workflow**
 
 > Keep the repo **private** — the workflow logs print your brief.
+
+## 3b. Run it every morning on your own computer (needed for Option A)
+
+Your computer has to be on (or asleep but able to wake) at that time.
+
+**Windows** (Task Scheduler). Run this in Command Prompt, fixing the paths:
+
+```bat
+schtasks /Create /TN "Canvas Morning Brief" /SC DAILY /ST 07:30 ^
+  /TR "\"C:\Path\To\python.exe\" \"C:\Path\To\Canvas-Bot\morning_brief.py\""
+```
+
+(`where python` shows your Python path.) Then open Task Scheduler, find the task,
+and under **Settings** tick *"Run task as soon as possible after a scheduled
+start is missed"* so it catches up if your PC was off.
+
+**Mac / Linux** (cron). Run `crontab -e` and add:
+
+```
+30 7 * * * cd /path/to/Canvas-Bot && /usr/bin/python3 morning_brief.py
+```
