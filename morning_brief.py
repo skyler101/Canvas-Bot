@@ -1095,6 +1095,8 @@ def self_check():
     )
     if not CANVAS_BASE_URL:
         bad("CANVAS_BASE_URL is empty in .env. Set it to https://montana.instructure.com")
+    elif "yourschool" in CANVAS_BASE_URL:
+        bad("CANVAS_BASE_URL is still the example. In .env set it to https://montana.instructure.com")
     elif not CANVAS_BASE_URL.startswith("https://") or "/" in CANVAS_BASE_URL[8:]:
         bad(f"CANVAS_BASE_URL should look like https://montana.instructure.com (yours: {CANVAS_BASE_URL})")
     else:
