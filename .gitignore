@@ -6,3 +6,7 @@ brief.md
 session.json
 dashboard.html
 grade_snapshots.json
+my_settings.json
+debug/
+photos/*
+!photos/README.txt

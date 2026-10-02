@@ -68,11 +68,22 @@ a { color: inherit; }
 button { font: inherit; color: inherit; }
 .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 16px 64px; }
 
-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
-h1 { font-size: 28px; line-height: 1.2; margin: 0; letter-spacing: -.01em; }
-.sub { color: var(--text-2); margin-top: 4px; }
-.icon-btn { background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; cursor: pointer; color: var(--text-2); }
-.icon-btn:hover { color: var(--text); }
+/* hero: today's picture + quote */
+.hero { position: relative; border-radius: 20px; overflow: hidden; min-height: 250px; margin-bottom: 16px; background: #24324a; color: #fff; display: flex; flex-direction: column; justify-content: space-between; }
+.hero-bg { position: absolute; inset: 0; }
+.hero-bg img, .hero-bg svg { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.35) 0%, rgba(0,0,0,0) 38%, rgba(0,0,0,.15) 55%, rgba(0,0,0,.7) 100%); }
+.hero > .hero-top, .hero > .hero-bottom { position: relative; z-index: 1; padding: 20px 24px; }
+.hero-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+h1 { font-size: 30px; line-height: 1.2; margin: 0; letter-spacing: -.01em; text-shadow: 0 1px 8px rgba(0,0,0,.35); }
+.sub { margin-top: 4px; color: rgba(255,255,255,.88); text-shadow: 0 1px 6px rgba(0,0,0,.4); }
+.quote { font-size: 19px; line-height: 1.4; font-weight: 550; max-width: 780px; margin: 0; text-shadow: 0 1px 10px rgba(0,0,0,.5); }
+.quote-by { margin-top: 4px; color: rgba(255,255,255,.85); font-size: 14px; }
+.hobby { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; background: rgba(255,255,255,.18); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,.3); border-radius: 999px; padding: 4px 12px; font-size: 14px; }
+.icon-btn { background: rgba(0,0,0,.28); border: 1px solid rgba(255,255,255,.35); border-radius: 999px; padding: 6px 14px; cursor: pointer; color: #fff; backdrop-filter: blur(6px); white-space: nowrap; }
+.icon-btn:hover { background: rgba(0,0,0,.45); }
+.banner.soft { background: var(--warning-soft); border-color: var(--warning); }
+.note-line { font-size: 13px; color: var(--text-2); margin-top: 2px; }
 
 .banner { border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; background: var(--critical-soft); border: 1px solid var(--critical); }
 .banner code { background: var(--card); padding: 1px 6px; border-radius: 4px; }
@@ -200,6 +211,8 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 }
 @media (max-width: 420px) {
   h1 { font-size: 23px; }
+  .quote { font-size: 16px; }
+  .hero > .hero-top, .hero > .hero-bottom { padding: 16px; }
   .tile .v { font-size: 22px; }
   .card { padding: 16px; }
 }
@@ -207,12 +220,20 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 </head>
 <body>
 <div class="wrap">
-  <header>
-    <div>
-      <h1 id="greeting">Good morning</h1>
-      <div class="sub" id="subtitle"></div>
+  <header class="hero" id="hero">
+    <div class="hero-bg" id="heroBg" aria-hidden="true"></div>
+    <div class="hero-top">
+      <div>
+        <h1 id="greeting">Good morning</h1>
+        <div class="sub" id="subtitle"></div>
+      </div>
+      <button class="icon-btn" id="themeBtn" type="button" aria-label="Toggle dark mode">◐ Theme</button>
     </div>
-    <button class="icon-btn" id="themeBtn" type="button" aria-label="Toggle dark mode">◐ Theme</button>
+    <div class="hero-bottom">
+      <p class="quote" id="quote"></p>
+      <div class="quote-by" id="quoteBy"></div>
+      <div id="hobby"></div>
+    </div>
   </header>
 
   <div id="banner"></div>
@@ -373,8 +394,71 @@ const items = {};
 for (const a of [...DATA.upcoming, ...DATA.missing]) items[a.id] = a;
 const taskKey = (t, i) => (t.item_id ? t.item_id : `task:${DATA.today}:${i}`);
 
+/* ---------- hero: a new mountain scene each day when there's no photo ---------- */
+function rng(seed) {
+  let a = seed >>> 0;
+  return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const SCENES = [
+  { sky: ["#f6b48f", "#fbe3c8"], sun: "#fff4dc", ridges: ["#c9a2b8", "#9b7a9e", "#6b5a82", "#3d3a5c"] },   // sunrise
+  { sky: ["#4f8fd6", "#bfe0f7"], sun: "#ffffff", ridges: ["#a9c3dc", "#7397bd", "#45698f", "#223f5c"] },   // bluebird day
+  { sky: ["#2b2d5c", "#d9798a"], sun: "#ffd2a8", ridges: ["#8d6b93", "#5f4d78", "#3a3459", "#1e1e38"] },   // dusk
+  { sky: ["#0b1d33", "#2c6e74"], sun: "#e8fff4", ridges: ["#2f5d66", "#22474f", "#163338", "#0b1e22"] },   // northern lights night
+  { sky: ["#d8e4ec", "#f4f7f9"], sun: "#ffffff", ridges: ["#b9c8d3", "#8ea4b5", "#5e7a90", "#33495c"] },   // snowy
+  { sky: ["#f2c15a", "#fbe7b0"], sun: "#fffbe8", ridges: ["#d39a5c", "#a96f46", "#6f4a35", "#3b2a22"] },   // golden fall
+];
+function mountainSVG(seed) {
+  const r = rng(seed * 2654435761), sc = SCENES[seed % SCENES.length];
+  const W = 1200, H = 360;
+  const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "xMidYMid slice" });
+  const defs = sv("defs"), g = sv("linearGradient", { id: "sky", x1: 0, y1: 0, x2: 0, y2: 1 });
+  g.append(sv("stop", { offset: "0", "stop-color": sc.sky[0] }), sv("stop", { offset: "1", "stop-color": sc.sky[1] }));
+  defs.append(g); svg.append(defs, sv("rect", { width: W, height: H, fill: "url(#sky)" }));
+  if (seed % SCENES.length === 3) {  // stars + aurora at night
+    for (let i = 0; i < 70; i++) svg.append(sv("circle", { cx: r() * W, cy: r() * H * 0.5, r: r() * 1.4 + 0.3, fill: "#fff", opacity: 0.4 + r() * 0.6 }));
+    svg.append(sv("path", { d: `M0,${110 + r() * 30} C300,${40 + r() * 40} 600,${150 + r() * 30} ${W},${60 + r() * 40}`, stroke: "#6dffc0", "stroke-width": 26, fill: "none", opacity: 0.25 }));
+  }
+  svg.append(sv("circle", { cx: 150 + r() * (W - 300), cy: 70 + r() * 70, r: 26 + r() * 18, fill: sc.sun, opacity: 0.9 }));
+  sc.ridges.forEach((color, layer) => {
+    const base = H * (0.45 + layer * 0.13), amp = 120 - layer * 22;
+    const pts = [[0, base - r() * amp * 0.5]];
+    let x = 0;
+    while (x < W) { x += 50 + r() * 110; pts.push([Math.min(x, W), base - r() * amp]); }
+    svg.append(sv("path", { d: `M0,${H} L${pts.map((p) => p.join(",")).join(" L")} L${W},${H} Z`, fill: color }));
+    if (layer === 0) {  // snow caps on the far range
+      for (let i = 1; i < pts.length - 1; i++) {
+        const [px, py] = pts[i];
+        if (py > base - amp * 0.6) continue;
+        const [ax, ay] = pts[i - 1], [bx, by] = pts[i + 1], t = 0.28;
+        const lx = px + (ax - px) * t, ly = py + (ay - py) * t, rx = px + (bx - px) * t, ry = py + (by - py) * t;
+        svg.append(sv("path", { d: `M${lx},${ly} L${px},${py} L${rx},${ry} L${(px + rx) / 2},${ry - 6} L${px},${(ly + ry) / 2 + 4} L${(lx + px) / 2},${ly - 4} Z`, fill: "#ffffff", opacity: 0.92 }));
+      }
+    }
+  });
+  return svg;
+}
+
+function renderHero() {
+  const hero = DATA.hero || {};
+  const bg = $("heroBg");
+  if (!bg.firstChild) {
+    if (hero.photo) {
+      const img = el("img", { src: hero.photo, alt: "" });
+      img.addEventListener("error", () => bg.replaceChildren(mountainSVG(hero.seed || 1)));
+      bg.append(img);
+    } else {
+      bg.append(mountainSVG(hero.seed || 1));
+    }
+  }
+  $("quote").textContent = hero.quote ? `“${hero.quote}”` : "";
+  $("quoteBy").textContent = hero.by ? `— ${hero.by}` : "";
+  $("hobby").replaceChildren();
+  if (hero.hobby) $("hobby").append(el("span", { class: "hobby", text: `${hero.hobbyEmoji || "⭐"} Today's reward: ${hero.hobby}. Finish your list, then go enjoy it.` }));
+}
+
 /* ---------- header ---------- */
 function renderHeader() {
+  renderHero();
   const h = now().getHours();
   $("greeting").textContent = h < 12 ? "Good morning ☀️" : h < 17 ? "Good afternoon" : "Good evening";
   const gen = new Date(DATA.generated);
@@ -383,6 +467,7 @@ function renderHeader() {
     (DATA.hasStatus ? "" : " · from your Canvas calendar feed");
   $("banner").replaceChildren();
   if (DATA.warning) $("banner").append(el("div", { class: "banner", role: "alert", text: "⚠️ " + DATA.warning }));
+  for (const e of DATA.siteErrors || []) $("banner").append(el("div", { class: "banner soft", text: "⚠️ " + e }));
 }
 
 function renderTiles() {
@@ -553,7 +638,8 @@ function renderDue() {
           el("div", { class: "r-title" }, url ? el("a", { href: url, target: "_blank", rel: "noopener", text: a.title }) : a.title),
           el("div", { class: "r-meta" }, courseTag(a.course),
             event ? el("span", { class: "pill neutral", text: "Class event" }) : el("span", { class: `pill ${u.cls}`, text: u.label }),
-            el("span", { text: a.type && !event ? a.type.replace(/_/g, " ").replace("topic", "") : "" }))
+            a.source ? el("span", { class: "pill neutral", text: a.source }) : el("span", { text: a.type && !event ? a.type.replace(/_/g, " ").replace("topic", "") : "" })),
+          a.note ? el("div", { class: "note-line", text: a.note }) : null
         ),
         el("div", { class: "r-right" }, el("b", { text: fmtTime(due) }), el("div", { text: countdown(due) }), a.points ? el("div", { text: `${a.points} pts` }) : null)
       ));
@@ -588,7 +674,9 @@ function renderMissing() {
       el("label", { for: id, style: "cursor:pointer" },
         el("div", { class: "t-title", text: a.title }),
         el("div", { class: "t-meta" }, courseTag(a.course), a.due ? el("span", { class: "pill critical", text: `Was due ${fmtDay(new Date(a.due))}` }) : null,
-          url ? el("a", { class: "open", href: url, target: "_blank", rel: "noopener", text: "Open ↗" }) : null)),
+          a.source ? el("span", { class: "pill neutral", text: a.source }) : null,
+          url ? el("a", { class: "open", href: url, target: "_blank", rel: "noopener", text: "Open ↗" }) : null),
+        a.note ? el("div", { class: "note-line", text: a.note }) : null),
       el("span", { class: "mins", text: a.points ? `${a.points} pts` : "" })
     ));
   });

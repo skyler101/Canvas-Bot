@@ -7,6 +7,10 @@ Usage:
                                        # so the script can reuse your session
     python morning_brief.py --no-ai    # skip the AI study plan
     python morning_brief.py --no-open  # don't pop the dashboard open in the browser
+    python morning_brief.py --install-startup  # run automatically when you log in (Windows)
+
+Extra sites (WeBWorK, Labflow), reminders, hobbies and quotes are set in
+my_settings.json (copy my_settings.example.json to start).
 
 The brief is saved as dashboard.html (interactive, opens in your browser) and
 brief.md (plain text, used for email/Discord/phone notifications).
@@ -25,6 +29,7 @@ import shutil
 import smtplib
 import subprocess
 import sys
+import time
 import webbrowser
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
@@ -60,6 +65,21 @@ SESSION_FILE = Path(
 GRADE_SNAPSHOTS = HERE / "grade_snapshots.json"
 DASHBOARD_TEMPLATE = HERE / "dashboard_template.html"
 DASHBOARD_FILE = HERE / "dashboard.html"
+SETTINGS_FILE = HERE / "my_settings.json"
+DEBUG_DIR = HERE / "debug"
+
+
+def load_settings():
+    """Personal settings (sites, reminders, hobbies, quotes). Missing file = defaults."""
+    if not SETTINGS_FILE.exists():
+        return {}
+    try:
+        return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    except ValueError as e:
+        sys.exit(
+            f"my_settings.json has a typo near line {getattr(e, 'lineno', '?')}: {e}\n"
+            "Common causes: a missing comma between items, or a comma after the last item."
+        )
 
 
 class LoginExpired(Exception):
@@ -407,6 +427,91 @@ def collect_from_ics(now):
     return data
 
 
+# ---------------------------------------------------------------- Extras
+
+
+def match_course(label, data):
+    """Map a label like 'M 151' to the Canvas course name, so colors line up."""
+    key = re.sub(r"\s+", "", label or "").lower()
+    names = {c["name"] for c in data["courses"].values()} | {a["course"] for a in data["upcoming"]}
+    for n in sorted(names):
+        if key and key in re.sub(r"\s+", "", n).lower():
+            return n
+    return label or ""
+
+
+def add_sites(data, settings, now):
+    """Pull assignments from WeBWorK/Labflow etc. (needs the --login browser session)."""
+    from sites import SITE_LABELS, fetch_sites, site_items
+
+    configured, errors = [], []
+    for site in settings.get("sites", []):
+        if not isinstance(site, dict):
+            continue
+        if not str(site.get("canvas_link", "")).startswith("http"):
+            errors.append(f"{site.get('type', 'site')} ({site.get('course', '')}): add its Canvas link in my_settings.json")
+        else:
+            configured.append(site)
+    if not configured:
+        return errors
+    if not SESSION_FILE.exists():
+        return ["WeBWorK/Labflow need the browser login. Run `python morning_brief.py --login` once."]
+    print("Checking WeBWorK/Labflow…", file=sys.stderr)
+    results, fetch_errors = fetch_sites(configured, SESSION_FILE, TZ, DEBUG_DIR)
+    errors += fetch_errors
+    for idx, parsed in results.items():
+        site = configured[idx]
+        kind = site["type"].lower()
+        course = match_course(site.get("course", ""), data)
+        upcoming, missing = site_items(kind, parsed, now, DAYS_AHEAD)
+        for a, bucket in [(a, "upcoming") for a in upcoming] + [(a, "missing") for a in missing]:
+            data[bucket].append(
+                {
+                    "course": course,
+                    "title": a["title"],
+                    "type": kind,
+                    "points": None,
+                    "due": a["due"],
+                    "url": site["canvas_link"],
+                    "note": a.get("note", ""),
+                    "source": SITE_LABELS.get(kind, kind),
+                }
+            )
+    data["upcoming"].sort(key=lambda a: a["due"])
+    return errors
+
+
+def add_reminders(data, settings, now):
+    """Extra to-dos derived from Canvas items, e.g. 'post Packback question a day early'."""
+    added = []
+    for r in settings.get("reminders", []):
+        if not isinstance(r, dict) or not r.get("match_title"):
+            continue
+        for a in data["upcoming"] + data["missing"]:
+            if a.get("type") == "reminder" or r["match_title"].lower() not in a["title"].lower():
+                continue
+            if r.get("match_course") and r["match_course"].lower() not in a["course"].lower():
+                continue
+            if not a["due"]:
+                continue
+            due = a["due"] - timedelta(days=float(r.get("days_before", 1)))
+            if due < now:
+                continue
+            added.append(
+                {
+                    "course": a["course"],
+                    "title": r.get("task") or f"Reminder: {a['title']}",
+                    "type": "reminder",
+                    "points": None,
+                    "due": due,
+                    "url": a["url"],
+                    "note": r.get("note") or f"Before: {a['title']}",
+                    "source": "Reminder",
+                }
+            )
+    data["upcoming"] = sorted(data["upcoming"] + added, key=lambda a: a["due"])
+
+
 def hash_str(s):
     """Small stable string hash (Python's hash() changes between runs)."""
     h = 2166136261
@@ -483,7 +588,8 @@ def render_plain(data, now, plan):
         lines.append(f"## ⚠️ Missing ({len(data['missing'])})")
         for a in data["missing"]:
             due = f" (was due {a['due'].strftime('%b')} {a['due'].day})" if a["due"] else ""
-            lines.append(f"- **{a['course']}** — {a['title']}{due}")
+            note = f" — {a['note']}" if a.get("note") else ""
+            lines.append(f"- **{a['course']}** — {a['title']}{due}{note}")
         lines.append("")
 
     lines.append(f"## 📅 Due in the next {DAYS_AHEAD} days ({len(data['upcoming'])})")
@@ -493,6 +599,8 @@ def render_plain(data, now, plan):
         pts = f" · {a['points']:g} pts" if a["points"] else ""
         course = f"{a['course']}: " if a["course"] else ""
         tag = " (class event)" if a["type"] == "event" else ""
+        tag += f" [{a['source']}]" if a.get("source") else ""
+        tag += f" — {a['note']}" if a.get("note") else ""
         lines.append(f"- **{fmt_due(a['due'], now)}** — {course}{a['title']}{pts}{tag}")
     lines.append("")
 
@@ -599,13 +707,15 @@ def ai_input(data, now):
     lines.append("\nMissing work:")
     for a in data["missing"]:
         due = fmt_day(a["due"]) if a["due"] else "?"
-        lines.append(f"[{a['id']}] {a['course']} | {a['title']} | was due {due} | {a['points'] or '?'} pts")
+        note = f" | {a['note']}" if a.get("note") else ""
+        lines.append(f"[{a['id']}] {a['course']} | {a['title']} | was due {due} | {a['points'] or '?'} pts{note}")
     if not data["missing"]:
         lines.append("(none)")
     lines.append(f"\nDue in the next {DAYS_AHEAD} days:")
     for a in data["upcoming"]:
         pts = f"{a['points']:g} pts" if a["points"] else "? pts"
-        lines.append(f"[{a['id']}] {fmt_due(a['due'], now)} | {a['course']} | {a['title']} | {a['type']} | {pts}")
+        note = f" | {a['note']}" if a.get("note") else ""
+        lines.append(f"[{a['id']}] {fmt_due(a['due'], now)} | {a['course']} | {a['title']} | {a['type']} | {pts}{note}")
     if not data["upcoming"]:
         lines.append("(none)")
     graded = [(c["name"], c["score"]) for c in data["courses"].values() if c["score"] is not None]
@@ -624,6 +734,12 @@ def ai_input(data, now):
         lines.append("\nAnnouncements:")
         for a in data["announcements"]:
             lines.append(f"{a['course']}: {a['title']}")
+    if data.get("hobby"):
+        lines.append(f"\nToday's featured hobby (you may nod to it in the note): {data['hobby']}")
+    lines.append(
+        "\nNotes: WeBWorK items don't show whether they're finished. Reminder items are "
+        "the student's own rules (e.g. post a Packback question a day early); treat them as real tasks."
+    )
     return "\n".join(lines)
 
 
@@ -698,7 +814,7 @@ def ai_study_plan(data, now):
 # ---------------------------------------------------------------- Dashboard
 
 
-def build_dashboard(data, plan, warning, now):
+def build_dashboard(data, plan, warning, now, hero):
     """Write dashboard.html: the template with this run's data embedded."""
     courses = sorted(
         {c["name"] for c in data["courses"].values()}
@@ -715,6 +831,8 @@ def build_dashboard(data, plan, warning, now):
             "points": a["points"],
             "due": a["due"].isoformat() if a["due"] else None,
             "url": a["url"],
+            "note": a.get("note", ""),
+            "source": a.get("source", ""),
         }
 
     payload = {
@@ -742,6 +860,8 @@ def build_dashboard(data, plan, warning, now):
         "todayTasks": plan["today"] if plan else default_today(data, now),
         "gradeHistory": data.get("grade_history", {}),
         "gradeChanges": data.get("grade_changes", [])[:40],
+        "hero": hero,
+        "siteErrors": data.get("site_errors", []),
     }
     blob = json.dumps(payload, ensure_ascii=False)
     # Keep the JSON from closing the <script> tag early
@@ -879,12 +999,89 @@ def load_data(now):
     )
 
 
+STARTUP_BAT = "Canvas Morning Brief.bat"
+REFRESH_BAT = "Refresh Morning Brief.bat"
+
+
+def _bat(args):
+    return (
+        "@echo off\r\ntitle Canvas Morning Brief\r\n"
+        f'cd /d "{HERE}"\r\n'
+        f'"{sys.executable}" "{HERE / "morning_brief.py"}" {args}\r\n'
+        "if errorlevel 1 pause\r\n"
+    )
+
+
+def _startup_dir():
+    return Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+
+
+def _desktop_dir():
+    home = Path(os.environ.get("USERPROFILE", Path.home()))
+    for d in (home / "OneDrive" / "Desktop", home / "Desktop"):
+        if d.is_dir():
+            return d
+    return home
+
+
+def install_startup(remove=False):
+    """Windows: run the brief when you log in, plus a 'Refresh' shortcut on the Desktop."""
+    if os.name != "nt":
+        sys.exit(
+            "Automatic startup setup is for Windows. On Mac/Linux, add this with `crontab -e`:\n"
+            f"30 7 * * * cd '{HERE}' && '{sys.executable}' morning_brief.py --no-open"
+        )
+    targets = [(_startup_dir() / STARTUP_BAT, "--startup"), (_desktop_dir() / REFRESH_BAT, "")]
+    for path, args in targets:
+        if remove:
+            path.unlink(missing_ok=True)
+            print(f"✓ Removed {path}")
+        else:
+            path.write_text(_bat(args), encoding="utf-8")
+            print(f"✓ Created {path}")
+    if not remove:
+        print(
+            "\nDone! Each time you log in to Windows, the brief runs once (the first time\n"
+            "that day) and opens your dashboard. Later logins just reopen it.\n"
+            "Double-click 'Refresh Morning Brief' on your Desktop to update it anytime."
+        )
+
+
+def ran_today(now):
+    try:
+        html = DASHBOARD_FILE.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    m = re.search(r'"today": "(\d{4}-\d\d-\d\d)"', html)
+    return bool(m and m.group(1) == now.date().isoformat())
+
+
+def wait_for_internet(timeout=120):
+    """Right after login Wi-Fi may not be connected yet; wait a bit for it."""
+    url = CANVAS_BASE_URL or CANVAS_ICS_URL.replace("webcal://", "https://", 1)
+    if not url:
+        return
+    deadline = time.time() + timeout
+    while True:
+        try:
+            requests.head(url, timeout=10)
+            return
+        except requests.RequestException:
+            if time.time() > deadline:
+                return
+            print("Waiting for internet…", file=sys.stderr)
+            time.sleep(5)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="don't send email/Discord/push")
     parser.add_argument("--login", action="store_true", help="log in to Canvas in a browser")
     parser.add_argument("--no-ai", action="store_true", help="skip the AI study plan")
     parser.add_argument("--no-open", action="store_true", help="don't open the dashboard")
+    parser.add_argument("--startup", action="store_true", help="run once per day, then just reopen")
+    parser.add_argument("--install-startup", action="store_true", help="run at Windows login")
+    parser.add_argument("--remove-startup", action="store_true", help="undo --install-startup")
     args = parser.parse_args()
 
     # Don't crash on emoji when output goes to a log file (e.g. Task Scheduler)
@@ -897,13 +1094,36 @@ def main():
     if args.login:
         browser_login()
         return
+    if args.install_startup or args.remove_startup:
+        install_startup(remove=args.remove_startup)
+        return
 
+    settings = load_settings()
     now = datetime.now(TZ)
+    if args.startup:
+        if ran_today(now):
+            print("Already updated today; opening your dashboard.", file=sys.stderr)
+            webbrowser.open(DASHBOARD_FILE.as_uri())
+            return
+        wait_for_internet()
+
     print("Checking Canvas…", file=sys.stderr)
     data, warning = load_data(now)
+    try:
+        data["site_errors"] = add_sites(data, settings, now)
+    except Exception as e:  # a broken site never stops the brief
+        data["site_errors"] = [f"Couldn't check WeBWorK/Labflow: {e}"]
+    for err in data["site_errors"]:
+        print(f"⚠ {err}", file=sys.stderr)
+    add_reminders(data, settings, now)
     assign_ids(data)
     if data["courses"]:
         data["grade_deltas"] = update_snapshots(data["courses"], now)
+
+    from motivation import daily_pick
+
+    hero = daily_pick(now, settings, HERE)
+    data["hobby"] = hero["hobby"]
 
     plan = None
     if not args.no_ai:
@@ -917,11 +1137,12 @@ def main():
     brief = render_plain(data, now, plan)
     if warning:
         brief = f"⚠️ **{warning}**\n\n{brief}"
+    brief += f"\n> {hero['quote']}" + (f" — {hero['by']}" if hero["by"] else "") + "\n"
     (HERE / "brief.md").write_text(brief, encoding="utf-8")
 
-    dashboard = build_dashboard(data, plan, warning, now)
+    dashboard = build_dashboard(data, plan, warning, now, hero)
     print(f"✓ Dashboard: {dashboard}", file=sys.stderr)
-    if not args.no_open and sys.stdout.isatty():
+    if args.startup or (not args.no_open and sys.stdout.isatty()):
         webbrowser.open(dashboard.as_uri())
 
     if args.dry_run:

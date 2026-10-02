@@ -1,0 +1,32 @@
+{
+  "_help": "Copy this file to my_settings.json and edit it. Keep the quotes and commas exactly like the examples.",
+
+  "hobbies": ["skiing", "hiking", "fishing"],
+
+  "quotes": [
+    {"text": "Add your own favorite quotes here.", "by": "You"}
+  ],
+
+  "sites": [
+    {
+      "type": "webwork",
+      "course": "M 151",
+      "canvas_link": "PASTE the Canvas link you click to open WeBWorK (right-click it in Canvas, then Copy link address)"
+    },
+    {
+      "type": "labflow",
+      "course": "CHMY 142",
+      "canvas_link": "PASTE the Canvas link you click to open Labflow"
+    }
+  ],
+
+  "reminders": [
+    {
+      "match_title": "packback",
+      "match_course": "GPHY",
+      "days_before": 1,
+      "task": "Post your Packback discussion question",
+      "note": "The question is due the day before the Packback due date."
+    }
+  ]
+}
