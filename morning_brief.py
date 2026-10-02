@@ -464,7 +464,10 @@ def add_sites(data, settings, now):
     if not SESSION_FILE.exists():
         return ["WeBWorK/Labflow need the browser login. Run `python morning_brief.py --login` once."]
     print("Checking WeBWorK/Labflow…", file=sys.stderr)
-    results, fetch_errors = fetch_sites(configured, SESSION_FILE, TZ, DEBUG_DIR)
+    results, fetch_errors = fetch_sites(
+        configured, SESSION_FILE, TZ, DEBUG_DIR,
+        interactive=sys.stdin.isatty(), cache_file=HERE / "site_cache.json",
+    )
     errors += fetch_errors
     for idx, parsed in results.items():
         site = configured[idx]
@@ -1150,7 +1153,10 @@ def self_check():
         print("\n  Now opening WeBWorK/Labflow in a visible browser so you can watch...\n")
         from sites import fetch_sites
 
-        results, errors = fetch_sites(good_sites, SESSION_FILE, TZ, DEBUG_DIR, show_browser=True)
+        results, errors = fetch_sites(
+            good_sites, SESSION_FILE, TZ, DEBUG_DIR, show_browser=True, interactive=True,
+            cache_file=HERE / "site_cache.json",
+        )
         for idx, items in results.items():
             ok(f"{good_sites[idx]['type']}: read {len(items)} assignments")
         for e in errors:

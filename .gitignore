@@ -10,3 +10,4 @@ my_settings.json
 debug/
 photos/*
 !photos/README.txt
+site_cache.json

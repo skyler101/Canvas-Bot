@@ -9,6 +9,7 @@ Each site is set up in my_settings.json with the Canvas link you click to open
 it (right-click the link in Canvas -> "Copy link address").
 """
 
+import json
 import re
 import sys
 import time
@@ -20,7 +21,7 @@ SITE_HOSTS = {"webwork": ("webwork",), "labflow": ("catalystedu.com", "labflow.c
 NEW_WINDOW = re.compile(r"in a new (browser )?(window|tab)", re.I)
 SITE_READY = {
     "webwork": re.compile(r"\bDue\b|Will open|Answers available|Closed", re.I),
-    "labflow": re.compile(r"\b(Opened|Opens|Closes|Closed)\s+\d\d/\d\d/\d{4}", re.I),
+    "labflow": re.compile(r"\b(Opened|Opens|Closes|Closed)\s+\d\d/\d\d/\d{4}|\bClose:\s*\d\d/\d\d/\d{4}", re.I),
 }
 SITE_LABELS = {"webwork": "WeBWorK", "labflow": "Labflow"}
 
@@ -119,20 +120,60 @@ def parse_labflow(text, tz):
                 "late_until": None,
             }
         )
-    # "Coming up" panel lists late cut-offs: "<title>...", "Open: ...", "Close: ...", "Cut-Off: ..."
-    for i, line in enumerate(lines):
-        cut = re.match(r"Cut-?Off:\s*" + LF_DATE, line, re.I)
-        if not cut:
-            continue
-        for j in range(i - 1, max(-1, i - 6), -1):
-            for item in out:
-                if item["title"] in lines[j] and not item["late_until"]:
-                    item["late_until"] = _parse_dt(cut.group(1).upper(), tz, LF_FORMATS)
-                    break
-            else:
-                continue
-            break
+    # The "Coming Up" panel is often the only place with dates (modules can be
+    # collapsed). Each entry: title line, "Open: ...", "Close: ...", "Cut-Off: ...".
+    for item in parse_labflow_coming_up(lines, tz):
+        match = next((o for o in out if o["title"] == item["title"]), None)
+        if match:
+            match["late_until"] = match["late_until"] or item["late_until"]
+            match["done"] = match["done"] or item["done"]
+        else:
+            out.append(item)
     return out
+
+
+LF_NOISE = re.compile(
+    r"^(calendar_today|lock|lock_open|loop.*|\d+ of \d+ attempts? left|attempts remaining.*|arrow_forward|[*•])$", re.I
+)
+
+
+def parse_labflow_coming_up(lines, tz):
+    items = []
+    for i, line in enumerate(lines):
+        mo = re.match(r"Open:\s*" + LF_DATE, line, re.I)
+        if not mo:
+            continue
+        close = cut = None
+        for j in range(i + 1, min(i + 4, len(lines))):
+            mc = re.match(r"Close:\s*" + LF_DATE, lines[j], re.I)
+            mx = re.match(r"Cut-?Off:\s*" + LF_DATE, lines[j], re.I)
+            close = close or (mc and mc.group(1))
+            cut = cut or (mx and mx.group(1))
+        if not close:
+            continue
+        # walk back past icon/attempt lines to the title
+        title_idx = None
+        for j in range(i - 1, max(-1, i - 6), -1):
+            clean = lines[j].lstrip("*• ").strip()
+            if clean and not LF_NOISE.match(clean) and not re.search(r"(Close|Cut-?Off):", clean, re.I):
+                title_idx = j
+                break
+        if title_idx is None:
+            continue
+        title = lines[title_idx].lstrip("*• ").strip()
+        title = re.split(r"(?=Lab \d+\s*:)", title)[0].strip() or title  # drop the "Lab 4: ..." suffix
+        title = re.sub(r"^check\s*Attempted\s*", "", title, flags=re.I)
+        above = " ".join(lines[max(0, title_idx - 1) : title_idx + 1])
+        items.append(
+            {
+                "title": title,
+                "opens": _parse_dt(mo.group(1).upper(), tz, LF_FORMATS),
+                "due": _parse_dt(close.upper(), tz, LF_FORMATS),
+                "late_until": _parse_dt(cut.upper(), tz, LF_FORMATS) if cut else None,
+                "done": bool(re.search(r"Attempted|Submitted|Completed", above, re.I)),
+            }
+        )
+    return items
 
 
 # ---------------------------------------------------------------- Browser
@@ -174,10 +215,21 @@ def _click_new_window(context):
     return False
 
 
-def _find_frame(context, hosts, ready, timeout):
-    """Wait until some page or iframe on one of `hosts` shows text matching `ready`."""
+def _looks_like_login(url):
+    u = urlsplit(url)
+    path = u.path.lower()
+    return u.netloc.startswith("login.") or any(k in path for k in ("/login", "/cas/", "/idp/", "/saml"))
+
+
+def _find_frame(context, hosts, ready, timeout, stop_at_login=True):
+    """Wait until some page or iframe on one of `hosts` shows text matching `ready`.
+
+    Returns (frame, None) on success, (None, "login") if stuck on a sign-in page
+    (e.g. MSU NetID + Duo), or (None, "timeout").
+    """
     deadline = time.time() + timeout
     clicks, next_click = 0, time.time() + 1
+    login_since = None
     while time.time() < deadline:
         for page in context.pages:
             for frame in page.frames:
@@ -185,9 +237,14 @@ def _find_frame(context, hosts, ready, timeout):
                     continue
                 try:
                     if ready.search(frame.inner_text("body", timeout=2000)):
-                        return frame
+                        return frame, None
                 except Exception:
                     pass
+        # A sign-in page that stays put for a few seconds needs a person
+        on_login = any(_looks_like_login(pg.url) for pg in context.pages)
+        login_since = (login_since or time.time()) if on_login else None
+        if stop_at_login and login_since and time.time() - login_since > 6:
+            return None, "login"
         # Tools like Labflow only open in a new window: press Canvas's button.
         # A first click sometimes does nothing, so press again if no window opened.
         if clicks < 6 and time.time() >= next_click:
@@ -196,18 +253,91 @@ def _find_frame(context, hosts, ready, timeout):
                 clicks += 1
                 next_click = time.time() + 4
         time.sleep(0.5)
-    return None
+    return None, "timeout"
 
 
-def fetch_sites(sites, session_file, tz, debug_dir, show_browser=False):
-    """Open each configured site through Canvas and return {site index: [assignments]}.
+def _read(kind, frame, tz):
+    if kind == "webwork":
+        return parse_webwork(frame.evaluate(WEBWORK_JS), tz)
+    return parse_labflow(frame.inner_text("body"), tz)
 
-    A site that fails is skipped with a message (and a screenshot in debug_dir),
-    so one broken site never stops the whole brief.
+
+def _cache_key(site):
+    return f"{site.get('type', '').lower()}|{site.get('canvas_link', '')}"
+
+
+def _load_cache(cache_file, tz):
+    try:
+        raw = json.loads(cache_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError, AttributeError):
+        return {}
+    out = {}
+    for key, entry in raw.items():
+        items = []
+        for a in entry.get("items", []):
+            a = dict(a)
+            for f in ("due", "opens", "late_until"):
+                a[f] = datetime.fromisoformat(a[f]).astimezone(tz) if a.get(f) else None
+            items.append(a)
+        out[key] = {"saved": entry.get("saved", ""), "items": items}
+    return out
+
+
+def _save_cache(cache_file, cache):
+    raw = {}
+    for key, entry in cache.items():
+        raw[key] = {
+            "saved": entry["saved"],
+            "items": [
+                {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in a.items()}
+                for a in entry["items"]
+            ],
+        }
+    try:
+        cache_file.write_text(json.dumps(raw, indent=1), encoding="utf-8")
+    except (OSError, AttributeError):
+        pass
+
+
+def _sign_in_window(p, site, kind, label, session_file, tz):
+    """Open a visible browser so you can sign in (NetID + Duo); read the site once you're in."""
+    browser = p.chromium.launch(headless=False)
+    try:
+        context = browser.new_context(storage_state=str(session_file))
+        page = context.new_page()
+        page.goto(site["canvas_link"], wait_until="domcontentloaded", timeout=60_000)
+        print(
+            f"\n👉 {label} needs you to sign in. A browser window just opened:\n"
+            "   log in there (NetID + Duo; tick 'remember me' if offered).\n"
+            "   Waiting up to 4 minutes...\n",
+            file=sys.stderr,
+        )
+        try:
+            page.bring_to_front()
+        except Exception:
+            pass
+        frame, _ = _find_frame(context, SITE_HOSTS[kind], SITE_READY[kind], timeout=240, stop_at_login=False)
+        if frame is None:
+            return None
+        items = _read(kind, frame, tz)
+        context.storage_state(path=str(session_file))  # keep the sign-in for next time
+        return items
+    finally:
+        browser.close()
+
+
+def fetch_sites(sites, session_file, tz, debug_dir, show_browser=False, interactive=False, cache_file=None):
+    """Open each configured site through Canvas and return ({site index: [assignments]}, [errors]).
+
+    - If a site needs a sign-in (like WeBWorK behind MSU login) and you're at the
+      computer (interactive), a visible window opens for you to log in.
+    - Otherwise the last successful result is reused, with a note saying when.
+    - One broken site never stops the whole brief.
     """
     from playwright.sync_api import sync_playwright
 
     results, errors = {}, []
+    cache = _load_cache(cache_file, tz) if cache_file else {}
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=not show_browser)
         try:
@@ -218,6 +348,7 @@ def fetch_sites(sites, session_file, tz, debug_dir, show_browser=False):
                     errors.append(f"{label or 'site'}: needs a type (webwork/labflow) and a canvas_link")
                     continue
                 context = browser.new_context(storage_state=str(session_file))
+                problem = None
                 try:
                     page = context.new_page()
                     page.goto(site["canvas_link"], wait_until="domcontentloaded", timeout=60_000)
@@ -225,26 +356,50 @@ def fetch_sites(sites, session_file, tz, debug_dir, show_browser=False):
                     start = urlsplit(page.url)
                     if start.netloc == canvas_host and start.path.startswith("/login"):
                         raise RuntimeError("Canvas showed its login page. Run --login again")
-                    frame = _find_frame(context, SITE_HOSTS[kind], SITE_READY[kind], timeout=90)
-                    if frame is None:
-                        raise RuntimeError(f"couldn't read {label}. The bot ended up at: {_where(context)}")
-                    if kind == "webwork":
-                        results[idx] = parse_webwork(frame.evaluate(WEBWORK_JS), tz)
+                    frame, reason = _find_frame(context, SITE_HOSTS[kind], SITE_READY[kind], timeout=90)
+                    if frame is not None:
+                        results[idx] = _read(kind, frame, tz)
+                        context.storage_state(path=str(session_file))
+                    elif reason == "login":
+                        context.close()
+                        context = None
+                        if interactive:
+                            items = _sign_in_window(p, site, kind, label, session_file, tz)
+                            if items is not None:
+                                results[idx] = items
+                            else:
+                                problem = f"{label} sign-in didn't finish"
+                        else:
+                            problem = f"{label} needs you to sign in (MSU login). It'll ask next time you run it at the computer"
                     else:
-                        results[idx] = parse_labflow(frame.inner_text("body"), tz)
-                    print(f"✓ {label}: found {len(results[idx])} assignments", file=sys.stderr)
+                        problem = f"couldn't read {label}. The bot ended up at: {_where(context)}"
                 except Exception as e:
-                    errors.append(f"{label} ({site.get('course', '')}): {e}")
-                    try:
-                        debug_dir.mkdir(exist_ok=True)
-                        for n, pg in enumerate(context.pages):
-                            pg.screenshot(path=str(debug_dir / f"{kind}-{n}.png"), full_page=True)
-                    except Exception:
-                        pass
-                finally:
+                    problem = str(e)
+                if idx in results:
+                    print(f"✓ {label}: found {len(results[idx])} assignments", file=sys.stderr)
+                    cache[_cache_key(site)] = {"saved": datetime.now(tz).isoformat(), "items": results[idx]}
+                else:
+                    msg = f"{label} ({site.get('course', '')}): {problem}"
+                    old = cache.get(_cache_key(site))
+                    if old and old["items"]:
+                        results[idx] = old["items"]
+                        saved = datetime.fromisoformat(old["saved"]) if old["saved"] else None
+                        when = f"{saved.strftime('%a %b')} {saved.day}" if saved else "earlier"
+                        msg += f". Showing what it saw on {when}"
+                    errors.append(msg)
+                    if context is not None:
+                        try:
+                            debug_dir.mkdir(exist_ok=True)
+                            for n, pg in enumerate(context.pages):
+                                pg.screenshot(path=str(debug_dir / f"{kind}-{n}.png"), full_page=True)
+                        except Exception:
+                            pass
+                if context is not None:
                     context.close()
         finally:
             browser.close()
+    if cache_file:
+        _save_cache(cache_file, cache)
     return results, errors
 
 

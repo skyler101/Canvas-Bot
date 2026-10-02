@@ -121,6 +121,9 @@ Copy `my_settings.example.json` to `my_settings.json` and edit it (Notepad is fi
   a "Load … in a new window" button, that's fine: the bot clicks it. Use the Canvas link, not the
   webwork3/labflow address it takes you to (those contain short-lived login keys).
   WeBWorK doesn't show whether a set is finished, so tick it off on the dashboard.
+  WeBWorK sits behind MSU's own login (NetID + Duo), which expires often. When it
+  does and you're at the computer, a browser window opens for you to sign in;
+  otherwise the dashboard shows the WeBWorK sets from the last successful check.
   If a site can't be read, the dashboard says so and screenshots go in `debug/`.
 - **Reminders**: extra to-dos based on Canvas items. The example adds "Post your
   Packback discussion question" one day before any Packback assignment in GPHY.
