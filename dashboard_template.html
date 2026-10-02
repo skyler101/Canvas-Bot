@@ -1,0 +1,828 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Morning Brief</title>
+<!-- Template for morning_brief.py. The script replaces the BRIEF_DATA marker
+     below with this run's Canvas data and saves the result as dashboard.html. -->
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f4f3ef;
+  --card: #fcfcfb;
+  --card-2: #f0efec;
+  --border: #e3e1db;
+  --text: #0b0b0b;
+  --text-2: #52514e;
+  --muted: #7a7974;
+  --grid: #e8e6e1;
+  --accent: #2a78d6;
+  --accent-soft: #e6f0fc;
+  --critical: #d03b3b;
+  --warning: #b77900;
+  --good: #0a7d0a;
+  --critical-soft: #fbeaea;
+  --warning-soft: #fdf3dc;
+  --good-soft: #e5f4e5;
+  --bar: #2a78d6;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
+  --shadow: 0 1px 2px rgba(0,0,0,.04), 0 2px 8px rgba(0,0,0,.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #121211; --card: #1a1a19; --card-2: #242422; --border: #2e2e2b;
+    --text: #ffffff; --text-2: #c3c2b7; --muted: #8f8e86; --grid: #2c2c29;
+    --accent: #5598e7; --accent-soft: #1b2a3d;
+    --critical: #e66767; --warning: #fab219; --good: #3fbf3f;
+    --critical-soft: #3a1f1f; --warning-soft: #3a2f14; --good-soft: #1b301b;
+    --bar: #3987e5;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+    --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121211; --card: #1a1a19; --card-2: #242422; --border: #2e2e2b;
+  --text: #ffffff; --text-2: #c3c2b7; --muted: #8f8e86; --grid: #2c2c29;
+  --accent: #5598e7; --accent-soft: #1b2a3d;
+  --critical: #e66767; --warning: #fab219; --good: #3fbf3f;
+  --critical-soft: #3a1f1f; --warning-soft: #3a2f14; --good-soft: #1b301b;
+  --bar: #3987e5;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+  --shadow: none;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; }
+button { font: inherit; color: inherit; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 28px 16px 64px; }
+
+header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+h1 { font-size: 28px; line-height: 1.2; margin: 0; letter-spacing: -.01em; }
+.sub { color: var(--text-2); margin-top: 4px; }
+.icon-btn { background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; cursor: pointer; color: var(--text-2); }
+.icon-btn:hover { color: var(--text); }
+
+.banner { border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; background: var(--critical-soft); border: 1px solid var(--critical); }
+.banner code { background: var(--card); padding: 1px 6px; border-radius: 4px; }
+
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+.tile { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; box-shadow: var(--shadow); }
+.tile .k { color: var(--text-2); font-size: 13px; }
+.tile .v { font-size: 26px; font-weight: 650; line-height: 1.25; margin-top: 2px; }
+.tile .v small { font-size: 14px; font-weight: 500; color: var(--text-2); }
+.tile.alert { border-color: var(--critical); }
+
+.grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.col { display: grid; gap: 16px; min-width: 0; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 18px 20px; box-shadow: var(--shadow); min-width: 0; }
+.card h2 { font-size: 16px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+.card h2 .count { color: var(--muted); font-weight: 500; }
+.card h2 .right { margin-left: auto; font-weight: 500; font-size: 13px; color: var(--text-2); }
+.full { grid-column: 1 / -1; }
+.empty { color: var(--muted); padding: 6px 0; }
+.week { color: var(--text-2); margin: -4px 0 14px; }
+
+/* progress */
+.progress { height: 8px; border-radius: 999px; background: var(--card-2); overflow: hidden; margin: 0 0 14px; }
+.progress > div { height: 100%; background: var(--good); border-radius: 999px; transition: width .3s; }
+
+/* checklist */
+.tasks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.task { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: start; padding: 10px 12px; border-radius: 12px; background: var(--card-2); }
+.task.done { opacity: .55; }
+.task.done .t-title { text-decoration: line-through; }
+.check { appearance: none; width: 22px; height: 22px; margin: 1px 0 0; border-radius: 7px; border: 2px solid var(--muted); cursor: pointer; display: grid; place-items: center; background: var(--card); }
+.check:checked { background: var(--good); border-color: var(--good); }
+.check:checked::after { content: ""; width: 6px; height: 11px; border: solid #fff; border-width: 0 2.5px 2.5px 0; transform: translateY(-1px) rotate(45deg); }
+.check:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.t-title { font-weight: 600; }
+.t-meta { color: var(--text-2); font-size: 13px; margin-top: 2px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.mins { font-size: 13px; color: var(--text-2); white-space: nowrap; padding-top: 2px; }
+
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.course { display: inline-flex; align-items: center; gap: 6px; font-weight: 550; color: var(--text-2); }
+.pill { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.pill.critical { background: var(--critical-soft); color: var(--critical); }
+.pill.warning { background: var(--warning-soft); color: var(--warning); }
+.pill.good { background: var(--good-soft); color: var(--good); }
+.pill.neutral { background: var(--card-2); color: var(--text-2); }
+.open { color: var(--accent); text-decoration: none; font-size: 13px; white-space: nowrap; }
+.open:hover { text-decoration: underline; }
+
+/* filters */
+.filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.chip { border: 1px solid var(--border); background: var(--card); border-radius: 999px; padding: 4px 12px; cursor: pointer; font-size: 13px; color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; }
+.chip[aria-pressed="true"] { background: var(--card-2); color: var(--text); }
+.chip.off { opacity: .45; }
+.chip.off .dot { background: transparent !important; box-shadow: inset 0 0 0 1.5px var(--muted); }
+
+/* due list */
+.day { margin-top: 14px; }
+.day:first-child { margin-top: 0; }
+.day-h { font-size: 13px; font-weight: 650; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; display: flex; gap: 8px; }
+.day-h .n { color: var(--muted); font-weight: 500; text-transform: none; letter-spacing: 0; }
+.row { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: center; padding: 8px 4px; border-top: 1px solid var(--border); }
+.row:first-of-type { border-top: 0; }
+.row.done { opacity: .5; }
+.row.done .r-title { text-decoration: line-through; }
+.r-title { font-weight: 550; overflow-wrap: anywhere; }
+.r-title a { text-decoration: none; }
+.r-title a:hover { text-decoration: underline; }
+.r-meta { font-size: 13px; color: var(--text-2); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.r-right { text-align: right; font-size: 13px; color: var(--text-2); white-space: nowrap; }
+.r-right b { color: var(--text); font-weight: 600; }
+
+/* charts */
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { fill: var(--muted); font-size: 11px; }
+.tip { position: absolute; pointer-events: none; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,.12); min-width: 160px; max-width: 260px; z-index: 5; display: none; }
+.tip .th { font-weight: 650; margin-bottom: 4px; }
+.tip .tr { display: flex; align-items: center; gap: 6px; color: var(--text-2); }
+.tip .tr b { color: var(--text); margin-left: auto; padding-left: 10px; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+.seg button { border: 0; background: transparent; padding: 4px 12px; cursor: pointer; font-size: 13px; color: var(--text-2); }
+.seg button[aria-pressed="true"] { background: var(--text); color: var(--card); }
+.chart-controls { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+.linkish { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font-size: 13px; }
+
+/* grade tiles */
+.gtiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin-bottom: 18px; }
+.gtile { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; background: var(--card); cursor: pointer; text-align: left; }
+.gtile:hover { border-color: var(--muted); }
+.gtile.off { opacity: .45; }
+.gtile .gname { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; color: var(--text-2); }
+.gtile .gscore { font-size: 24px; font-weight: 650; margin: 2px 0; }
+.gtile .gscore small { font-size: 13px; color: var(--text-2); font-weight: 500; margin-left: 4px; }
+.gbar { height: 6px; background: var(--card-2); border-radius: 999px; overflow: hidden; margin-top: 6px; }
+.gbar > div { height: 100%; border-radius: 999px; }
+
+table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.data th, table.data td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+table.data th { color: var(--text-2); font-weight: 600; }
+table.data td.num, table.data th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.feed { list-style: none; margin: 0; padding: 0; }
+.feed li { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 10px 0; border-top: 1px solid var(--border); }
+.feed li:first-child { border-top: 0; }
+.feed .f-title { font-weight: 550; }
+.feed .f-meta { font-size: 13px; color: var(--text-2); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.feed .f-right { text-align: right; }
+.feed .f-score { font-weight: 650; }
+
+.study { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.study li { padding: 10px 12px; border-radius: 12px; background: var(--card-2); }
+.study .s-why { color: var(--text-2); font-size: 13px; margin-top: 2px; }
+.plan-note { margin-top: 12px; color: var(--text-2); font-style: italic; }
+
+.countdown { font-size: 34px; font-weight: 700; letter-spacing: -.01em; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.next-title { font-weight: 600; margin-top: 6px; overflow-wrap: anywhere; }
+
+.ann { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.ann li { display: grid; gap: 2px; }
+
+@media (max-width: 860px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .tiles { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 420px) {
+  h1 { font-size: 23px; }
+  .tile .v { font-size: 22px; }
+  .card { padding: 16px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1 id="greeting">Good morning</h1>
+      <div class="sub" id="subtitle"></div>
+    </div>
+    <button class="icon-btn" id="themeBtn" type="button" aria-label="Toggle dark mode">◐ Theme</button>
+  </header>
+
+  <div id="banner"></div>
+  <section class="tiles" id="tiles" aria-label="Summary"></section>
+
+  <div class="grid">
+    <div class="col">
+      <section class="card" id="todayCard">
+        <h2>✅ Do today <span class="right" id="todayLeft"></span></h2>
+        <p class="week" id="weekText" hidden></p>
+        <div class="progress" aria-hidden="true"><div id="todayBar" style="width:0"></div></div>
+        <ul class="tasks" id="todayList"></ul>
+      </section>
+
+      <section class="card">
+        <h2>📅 Coming up <span class="count" id="dueCount"></span></h2>
+        <div class="filters" id="courseFilters" role="group" aria-label="Filter by course"></div>
+        <div class="chart" id="workloadChart"></div>
+        <div id="dayFilterNote" class="note" hidden></div>
+        <div id="dueList" style="margin-top:14px"></div>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="card" id="nextCard">
+        <h2>⏱ Next deadline</h2>
+        <div id="nextBody"></div>
+      </section>
+      <section class="card" id="missingCard" hidden>
+        <h2>⚠️ Missing work <span class="count" id="missingCount"></span></h2>
+        <ul class="tasks" id="missingList"></ul>
+      </section>
+      <section class="card" id="studyCard" hidden>
+        <h2>🧠 What to study</h2>
+        <ul class="study" id="studyList"></ul>
+        <p class="plan-note" id="planNote" hidden></p>
+      </section>
+      <section class="card" id="annCard" hidden>
+        <h2>📣 Announcements</h2>
+        <ul class="ann" id="annList"></ul>
+      </section>
+    </div>
+
+    <section class="card full" id="gradesCard" hidden>
+      <h2>📊 Grades <span class="right" id="gradesNote"></span></h2>
+      <div class="gtiles" id="gradeTiles"></div>
+      <div class="chart-controls">
+        <div class="seg" role="group" aria-label="Time range" id="rangeSeg">
+          <button type="button" data-days="14">2 weeks</button>
+          <button type="button" data-days="30">Month</button>
+          <button type="button" data-days="0" aria-pressed="true">Semester</button>
+        </div>
+        <button class="linkish" type="button" id="tableToggle">Show as table</button>
+      </div>
+      <div class="chart" id="gradeChart"></div>
+      <div id="gradeTable" hidden></div>
+      <p class="note">Grade history is rebuilt from your graded work, using your courses' category weights. It doesn't account for things like dropped lowest scores, so it can differ slightly from Canvas. The big numbers above come straight from Canvas.</p>
+    </section>
+
+    <section class="card full" id="changesCard" hidden>
+      <h2>📝 Recent grade changes</h2>
+      <ul class="feed" id="changesList"></ul>
+    </section>
+  </div>
+</div>
+
+<script>
+const DATA = /*__BRIEF_DATA__*/null;
+
+/* ---------- helpers ---------- */
+const $ = (id) => document.getElementById(id);
+function el(tag, props = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (v == null || v === false) continue;
+    if (k === "class") n.className = v;
+    else if (k === "text") n.textContent = v;
+    else if (k === "style") n.setAttribute("style", v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid != null) n.append(kid);
+  return n;
+}
+const SVGNS = "http://www.w3.org/2000/svg";
+function sv(tag, attrs = {}) {
+  const n = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  return n;
+}
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const safeUrl = (u) => (/^https?:\/\//i.test(u || "") ? u : null);
+const DAY = 86400000;
+const now = () => new Date();
+const dayKey = (d) => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+const fmtDay = (d) => d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+const fmtTime = (d) => d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+function relDay(d) {
+  const a = new Date(now()); a.setHours(0, 0, 0, 0);
+  const b = new Date(d); b.setHours(0, 0, 0, 0);
+  const diff = Math.round((b - a) / DAY);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Tomorrow";
+  if (diff === -1) return "Yesterday";
+  return fmtDay(d);
+}
+function countdown(d) {
+  const ms = d - now();
+  if (ms <= 0) return "past due";
+  const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
+  if (h < 1) return `${m}m left`;
+  if (h < 48) return `${h}h ${m}m left`;
+  return `${Math.floor(h / 24)}d ${h % 24}h left`;
+}
+function urgency(d) {
+  const h = (d - now()) / 3600000;
+  if (h < 24) return { cls: "critical", label: "● Due soon" };
+  if (h < 72) return { cls: "warning", label: "◐ This week" };
+  return { cls: "good", label: "○ Later" };
+}
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+function fmtMins(m) {
+  if (!m) return "";
+  if (m < 60) return `~${m} min`;
+  const h = Math.floor(m / 60), r = m % 60;
+  return r ? `~${h}h ${r}m` : `~${h}h`;
+}
+
+/* ---------- saved state (checkboxes, theme, filters) ---------- */
+const STORE = "canvasbot";
+function load(key, fallback) {
+  try { const v = localStorage.getItem(`${STORE}:${key}`); return v ? JSON.parse(v) : fallback; }
+  catch { return fallback; }
+}
+function save(key, value) {
+  try { localStorage.setItem(`${STORE}:${key}`, JSON.stringify(value)); } catch {}
+}
+let done = load("done", {});
+// forget check marks older than 45 days
+for (const [k, t] of Object.entries(done)) if (Date.now() - t > 45 * DAY) delete done[k];
+const isDone = (k) => !!done[k];
+function setDone(k, v) {
+  if (v) done[k] = Date.now(); else delete done[k];
+  save("done", done);
+  renderAll();
+}
+
+/* ---------- course colors: fixed by course, never by rank ---------- */
+const courseNames = (DATA.courses || []).map((c) => c.name);
+const courseColor = (name) => {
+  const i = courseNames.indexOf(name);
+  return i < 0 ? "var(--muted)" : `var(--s${(i % 8) + 1})`;
+};
+const courseDot = (name) => el("span", { class: "dot", style: `background:${courseColor(name)}` });
+const courseTag = (name) => (name ? el("span", { class: "course" }, courseDot(name), name) : null);
+
+const items = {};
+for (const a of [...DATA.upcoming, ...DATA.missing]) items[a.id] = a;
+const taskKey = (t, i) => (t.item_id ? t.item_id : `task:${DATA.today}:${i}`);
+
+/* ---------- header ---------- */
+function renderHeader() {
+  const h = now().getHours();
+  $("greeting").textContent = h < 12 ? "Good morning ☀️" : h < 17 ? "Good afternoon" : "Good evening";
+  const gen = new Date(DATA.generated);
+  $("subtitle").textContent =
+    `${gen.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })} · updated ${fmtTime(gen)}` +
+    (DATA.hasStatus ? "" : " · from your Canvas calendar feed");
+  $("banner").replaceChildren();
+  if (DATA.warning) $("banner").append(el("div", { class: "banner", role: "alert", text: "⚠️ " + DATA.warning }));
+}
+
+function renderTiles() {
+  const work = DATA.upcoming.filter((a) => a.type !== "event");
+  const open = work.filter((a) => !isDone(a.id));
+  const dueToday = open.filter((a) => relDay(new Date(a.due)) === "Today").length;
+  const missing = DATA.missing.filter((a) => !isDone(a.id)).length;
+  const byDay = {};
+  for (const a of work) { const k = dayKey(new Date(a.due)); byDay[k] = byDay[k] || { n: 0, d: new Date(a.due) }; byDay[k].n++; }
+  const busiest = Object.values(byDay).sort((a, b) => b.n - a.n)[0];
+  const tile = (k, v, sub, alert) =>
+    el("div", { class: "tile" + (alert ? " alert" : "") }, el("div", { class: "k", text: k }), el("div", { class: "v" }, String(v), sub ? el("small", { text: " " + sub }) : null));
+  $("tiles").replaceChildren(
+    tile(`Due in ${DATA.daysAhead} days`, open.length, open.length !== work.length ? `of ${work.length}` : ""),
+    tile("Due today", dueToday, "", dueToday > 0),
+    tile("Missing", DATA.hasStatus ? missing : "–", DATA.hasStatus ? "" : "n/a", missing > 0),
+    tile("Busiest day", busiest ? relDay(busiest.d) : "–", busiest ? `${plural(busiest.n, "item")}` : "")
+  );
+}
+
+/* ---------- do today ---------- */
+function renderToday() {
+  const tasks = DATA.todayTasks || [];
+  const plan = DATA.plan;
+  if (plan && plan.week) { $("weekText").textContent = plan.week; $("weekText").hidden = false; }
+  const list = $("todayList");
+  list.replaceChildren();
+  if (!tasks.length) list.append(el("li", { class: "empty", text: "Nothing urgent today. Get ahead on the week, or take a break. 🎉" }));
+  let doneN = 0, minsLeft = 0;
+  tasks.forEach((t, i) => {
+    const key = taskKey(t, i);
+    const checked = isDone(key);
+    if (checked) doneN++; else minsLeft += t.minutes || 0;
+    const it = t.item_id ? items[t.item_id] : null;
+    const due = it && it.due ? new Date(it.due) : null;
+    const url = it && safeUrl(it.url);
+    const id = `t${i}`;
+    list.append(
+      el("li", { class: "task" + (checked ? " done" : "") },
+        el("input", { type: "checkbox", class: "check", id, checked, "aria-label": `Done: ${t.task}`, onchange: (e) => setDone(key, e.target.checked) }),
+        el("label", { for: id, style: "cursor:pointer" },
+          el("div", { class: "t-title", text: t.task }),
+          el("div", { class: "t-meta" },
+            courseTag(t.course),
+            due ? el("span", { class: `pill ${urgency(due).cls}`, text: `${relDay(due)} ${fmtTime(due)}` }) : null,
+            t.why ? el("span", { text: t.why }) : null,
+            url ? el("a", { class: "open", href: url, target: "_blank", rel: "noopener", text: "Open ↗" }) : null
+          )
+        ),
+        el("span", { class: "mins", text: fmtMins(t.minutes) })
+      )
+    );
+  });
+  $("todayBar").style.width = tasks.length ? `${(100 * doneN) / tasks.length}%` : "0";
+  $("todayLeft").textContent = tasks.length
+    ? (doneN === tasks.length ? "All done! 🎉" : `${doneN}/${tasks.length} done${minsLeft ? ` · ${fmtMins(minsLeft)} left` : ""}`)
+    : "";
+}
+
+/* ---------- coming up: filters, workload chart, list ---------- */
+let courseFilter = new Set(load("hiddenCourses", []));
+let dayFilter = null;
+
+function renderFilters() {
+  const names = [...new Set(DATA.upcoming.map((a) => a.course).filter(Boolean))];
+  const box = $("courseFilters");
+  box.replaceChildren();
+  if (names.length < 2) return;
+  for (const n of names) {
+    const off = courseFilter.has(n);
+    box.append(el("button", {
+      type: "button", class: "chip" + (off ? " off" : ""), "aria-pressed": String(!off),
+      title: off ? `Show ${n}` : `Hide ${n}`,
+      onclick: () => { off ? courseFilter.delete(n) : courseFilter.add(n); save("hiddenCourses", [...courseFilter]); renderAll(); },
+    }, courseDot(n), n));
+  }
+}
+const visibleUpcoming = () => DATA.upcoming.filter((a) => !courseFilter.has(a.course));
+
+function renderWorkload() {
+  const box = $("workloadChart");
+  box.replaceChildren();
+  const start = new Date(DATA.generated); start.setHours(0, 0, 0, 0);
+  const days = [];
+  for (let i = 0; i <= DATA.daysAhead; i++) {
+    const d = new Date(start.getTime() + i * DAY);
+    const list = visibleUpcoming().filter((a) => a.type !== "event" && dayKey(new Date(a.due)) === dayKey(d));
+    days.push({ d, n: list.length, pts: list.reduce((s, a) => s + (a.points || 0), 0), list });
+  }
+  const W = 640, H = 150, padL = 8, padB = 34, padT = 18;
+  const max = Math.max(1, ...days.map((x) => x.n));
+  const slot = (W - padL * 2) / days.length;
+  const bw = Math.min(44, slot * 0.6);
+  const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Assignments due per day" });
+  svg.append(sv("line", { x1: padL, x2: W - padL, y1: H - padB, y2: H - padB, stroke: css("--grid"), "stroke-width": 1 }));
+  const tip = el("div", { class: "tip" });
+  days.forEach((x, i) => {
+    const cx = padL + slot * i + slot / 2;
+    const h = x.n ? Math.max(6, ((H - padB - padT) * x.n) / max) : 0;
+    const sel = dayFilter && dayKey(dayFilter) === dayKey(x.d);
+    const dim = dayFilter && !sel;
+    if (h) {
+      const y = H - padB - h, r = Math.min(4, bw / 2);
+      // rounded top, square base
+      svg.append(sv("path", {
+        d: `M${cx - bw / 2},${H - padB} V${y + r} Q${cx - bw / 2},${y} ${cx - bw / 2 + r},${y} H${cx + bw / 2 - r} Q${cx + bw / 2},${y} ${cx + bw / 2},${y + r} V${H - padB} Z`,
+        fill: css("--bar"), opacity: dim ? 0.3 : 1,
+      }));
+      const t = sv("text", { x: cx, y: y - 5, "text-anchor": "middle", style: `fill:${css("--text-2")};font-weight:600` });
+      t.textContent = x.n;
+      svg.append(t);
+    }
+    const lab = sv("text", { x: cx, y: H - padB + 15, "text-anchor": "middle", style: sel ? `fill:${css("--text")};font-weight:700` : "" });
+    lab.textContent = i === 0 ? "Today" : x.d.toLocaleDateString(undefined, { weekday: "short" });
+    const lab2 = sv("text", { x: cx, y: H - padB + 28, "text-anchor": "middle" });
+    lab2.textContent = x.d.getDate();
+    svg.append(lab, lab2);
+    // generous hit target over the whole column
+    const hit = sv("rect", { x: cx - slot / 2, y: 0, width: slot, height: H, fill: "transparent", style: "cursor:pointer", tabindex: 0, role: "button", "aria-label": `${fmtDay(x.d)}: ${plural(x.n, "item")}` });
+    const show = () => {
+      tip.replaceChildren(el("div", { class: "th", text: fmtDay(x.d) }),
+        ...(x.n ? x.list.map((a) => el("div", { class: "tr" }, courseDot(a.course), el("span", { text: a.title }))) : [el("div", { class: "tr", text: "Nothing due" })]),
+        x.pts ? el("div", { class: "tr", style: "margin-top:4px" }, "Points", el("b", { text: String(x.pts) })) : null,
+        el("div", { class: "tr", style: "margin-top:4px;font-size:12px", text: sel ? "Click to show all days" : "Click to show just this day" }));
+      tip.style.display = "block";
+      const bx = box.getBoundingClientRect(), scale = bx.width / W;
+      let left = cx * scale + 12;
+      if (left + 240 > bx.width) left = cx * scale - 252;
+      tip.style.left = `${Math.max(0, left)}px`; tip.style.top = "0px";
+    };
+    const toggle = () => { dayFilter = sel ? null : x.d; renderAll(); };
+    hit.addEventListener("mouseenter", show);
+    hit.addEventListener("focus", show);
+    hit.addEventListener("mouseleave", () => (tip.style.display = "none"));
+    hit.addEventListener("blur", () => (tip.style.display = "none"));
+    hit.addEventListener("click", toggle);
+    hit.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+    svg.append(hit);
+  });
+  box.append(svg, tip);
+  const note = $("dayFilterNote");
+  note.hidden = !dayFilter;
+  note.replaceChildren();
+  if (dayFilter) note.append(`Showing ${fmtDay(dayFilter)} only · `, el("button", { class: "linkish", type: "button", text: "show all", onclick: () => { dayFilter = null; renderAll(); } }));
+}
+
+function renderDue() {
+  let list = visibleUpcoming();
+  if (dayFilter) list = list.filter((a) => dayKey(new Date(a.due)) === dayKey(dayFilter));
+  const work = DATA.upcoming.filter((a) => a.type !== "event");
+  $("dueCount").textContent = `${work.filter((a) => !isDone(a.id)).length} open`;
+  const box = $("dueList");
+  box.replaceChildren();
+  if (!list.length) { box.append(el("div", { class: "empty", text: DATA.upcoming.length ? "Nothing matches these filters." : "Nothing due. Enjoy it 🎉" })); return; }
+  const groups = new Map();
+  for (const a of list) { const k = dayKey(new Date(a.due)); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(a); }
+  for (const g of groups.values()) {
+    const d = new Date(g[0].due);
+    const pts = g.reduce((s, a) => s + (a.points || 0), 0);
+    const sec = el("div", { class: "day" }, el("div", { class: "day-h" }, relDay(d), el("span", { class: "n", text: `${plural(g.length, "item")}${pts ? ` · ${pts} pts` : ""}` })));
+    for (const a of g) {
+      const due = new Date(a.due), u = urgency(due), url = safeUrl(a.url), event = a.type === "event";
+      const checked = isDone(a.id);
+      sec.append(el("div", { class: "row" + (checked ? " done" : "") },
+        event ? el("span", { "aria-hidden": "true", style: "text-align:center;color:var(--muted)", text: "◇" })
+              : el("input", { type: "checkbox", class: "check", checked, "aria-label": `Done: ${a.title}`, onchange: (e) => setDone(a.id, e.target.checked) }),
+        el("div", {},
+          el("div", { class: "r-title" }, url ? el("a", { href: url, target: "_blank", rel: "noopener", text: a.title }) : a.title),
+          el("div", { class: "r-meta" }, courseTag(a.course),
+            event ? el("span", { class: "pill neutral", text: "Class event" }) : el("span", { class: `pill ${u.cls}`, text: u.label }),
+            el("span", { text: a.type && !event ? a.type.replace(/_/g, " ").replace("topic", "") : "" }))
+        ),
+        el("div", { class: "r-right" }, el("b", { text: fmtTime(due) }), el("div", { text: countdown(due) }), a.points ? el("div", { text: `${a.points} pts` }) : null)
+      ));
+    }
+    box.append(sec);
+  }
+}
+
+/* ---------- side cards ---------- */
+function renderNext() {
+  const next = DATA.upcoming.filter((a) => a.type !== "event" && !isDone(a.id) && new Date(a.due) > now())[0];
+  const box = $("nextBody");
+  box.replaceChildren();
+  if (!next) { box.append(el("div", { class: "empty", text: "Nothing coming up. 🎉" })); return; }
+  const due = new Date(next.due), u = urgency(due), url = safeUrl(next.url);
+  box.append(
+    el("div", { class: "countdown", style: `color:var(--${u.cls === "good" ? "text" : u.cls})`, text: countdown(due).replace(" left", "") }),
+    el("div", { class: "next-title" }, url ? el("a", { href: url, target: "_blank", rel: "noopener", text: next.title }) : next.title),
+    el("div", { class: "r-meta", style: "margin-top:4px" }, courseTag(next.course), el("span", { text: `${relDay(due)} at ${fmtTime(due)}` }), next.points ? el("span", { text: `${next.points} pts` }) : null)
+  );
+}
+
+function renderMissing() {
+  $("missingCard").hidden = !DATA.missing.length;
+  $("missingCount").textContent = DATA.missing.length ? String(DATA.missing.length) : "";
+  const list = $("missingList");
+  list.replaceChildren();
+  DATA.missing.forEach((a, i) => {
+    const checked = isDone(a.id), url = safeUrl(a.url), id = `m${i}`;
+    list.append(el("li", { class: "task" + (checked ? " done" : "") },
+      el("input", { type: "checkbox", class: "check", id, checked, "aria-label": `Handled: ${a.title}`, onchange: (e) => setDone(a.id, e.target.checked) }),
+      el("label", { for: id, style: "cursor:pointer" },
+        el("div", { class: "t-title", text: a.title }),
+        el("div", { class: "t-meta" }, courseTag(a.course), a.due ? el("span", { class: "pill critical", text: `Was due ${fmtDay(new Date(a.due))}` }) : null,
+          url ? el("a", { class: "open", href: url, target: "_blank", rel: "noopener", text: "Open ↗" }) : null)),
+      el("span", { class: "mins", text: a.points ? `${a.points} pts` : "" })
+    ));
+  });
+}
+
+function renderStudy() {
+  const p = DATA.plan;
+  $("studyCard").hidden = !(p && p.study && p.study.length);
+  if ($("studyCard").hidden) return;
+  $("studyList").replaceChildren(...p.study.map((s) =>
+    el("li", {}, el("div", { class: "t-meta", style: "margin:0 0 2px" }, courseTag(s.course)), el("div", { class: "t-title", text: s.focus }), el("div", { class: "s-why", text: s.why }))));
+  if (p.note) { $("planNote").textContent = p.note; $("planNote").hidden = false; }
+}
+
+function renderAnnouncements() {
+  $("annCard").hidden = !DATA.announcements.length;
+  $("annList").replaceChildren(...DATA.announcements.map((a) => {
+    const url = safeUrl(a.url);
+    return el("li", {}, el("div", { class: "t-title" }, url ? el("a", { href: url, target: "_blank", rel: "noopener", text: a.title }) : a.title),
+      el("div", { class: "t-meta" }, courseTag(a.course), a.posted ? el("span", { text: relDay(new Date(a.posted)) }) : null));
+  }));
+}
+
+/* ---------- grades ---------- */
+let hiddenGrades = new Set(load("hiddenGrades", []));
+let rangeDays = load("gradeRange", 0);
+let showTable = false;
+const scoreColor = (s) => (s < 70 ? "var(--critical)" : s < 80 ? "var(--warning)" : "var(--good)");
+
+function renderGradeTiles() {
+  const graded = DATA.courses.filter((c) => c.score != null);
+  $("gradesCard").hidden = !graded.length && !Object.keys(DATA.gradeHistory).length;
+  const hist = DATA.gradeHistory;
+  $("gradeTiles").replaceChildren(...graded.map((c) => {
+    const off = hiddenGrades.has(c.name);
+    // change over the last 7 days from the rebuilt history, else since last run
+    let delta = null, label = "";
+    const h = hist[c.name];
+    if (h && h.length) {
+      const cutoff = now() - 7 * DAY;
+      const before = [...h].reverse().find((p) => new Date(p.t) < cutoff);
+      if (before) { delta = h[h.length - 1].grade - before.grade; label = "this week"; }
+    }
+    if (c.change) { delta = c.change.delta; label = "since last check"; }
+    const pill = delta != null && Math.abs(delta) >= 0.05
+      ? el("span", { class: `pill ${delta > 0 ? "good" : "critical"}`, text: `${delta > 0 ? "▲" : "▼"} ${Math.abs(delta).toFixed(1)} ${label}` })
+      : el("span", { class: "pill neutral", text: "No change" });
+    return el("button", { type: "button", class: "gtile" + (off ? " off" : ""), "aria-pressed": String(!off), title: off ? "Show on chart" : "Hide from chart",
+      onclick: () => { off ? hiddenGrades.delete(c.name) : hiddenGrades.add(c.name); save("hiddenGrades", [...hiddenGrades]); renderGrades(); } },
+      el("div", { class: "gname" }, courseDot(c.name), c.name),
+      el("div", { class: "gscore" }, `${c.score.toFixed(1)}%`),
+      pill,
+      el("div", { class: "gbar" }, el("div", { style: `width:${Math.min(100, c.score)}%;background:${scoreColor(c.score)}` })));
+  }));
+  $("gradesNote").textContent = graded.length ? "Click a course to show or hide it" : "";
+}
+
+function renderGradeChart() {
+  const box = $("gradeChart");
+  box.replaceChildren();
+  const end = now();
+  const startCut = rangeDays ? new Date(end - rangeDays * DAY) : null;
+  const series = Object.entries(DATA.gradeHistory)
+    .filter(([n]) => !hiddenGrades.has(n))
+    .map(([name, pts]) => {
+      let p = pts.map((x) => ({ ...x, d: new Date(x.t) }));
+      if (startCut) {
+        const prior = [...p].reverse().find((x) => x.d < startCut);
+        p = p.filter((x) => x.d >= startCut);
+        if (prior) p.unshift({ ...prior, d: startCut, carried: true });
+      }
+      if (p.length) p.push({ ...p[p.length - 1], d: end, carried: true });
+      return { name, p };
+    })
+    .filter((s) => s.p.length);
+  if (!series.length) {
+    box.append(el("div", { class: "empty", text: Object.keys(DATA.gradeHistory).length ? "All courses hidden. Click a course above to show it." : "No graded work yet." }));
+    return;
+  }
+  const W = 1000, H = 300, L = 44, R = 110, T = 12, B = 28;
+  const xs = series.flatMap((s) => s.p.map((x) => +x.d));
+  const x0 = startCut ? +startCut : Math.min(...xs), x1 = +end;
+  const ys = series.flatMap((s) => s.p.map((x) => x.grade));
+  let y0 = Math.max(0, Math.floor((Math.min(...ys) - 5) / 10) * 10), y1 = Math.min(Math.max(100, Math.ceil(Math.max(...ys))), 120);
+  if (y1 - y0 < 20) y0 = Math.max(0, y1 - 20);
+  const X = (t) => L + ((t - x0) / Math.max(1, x1 - x0)) * (W - L - R);
+  const Y = (g) => T + (1 - (g - y0) / (y1 - y0)) * (H - T - B);
+  const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Course grades over time" });
+
+  // grid + y labels
+  for (let g = y0; g <= y1; g += 10) {
+    svg.append(sv("line", { x1: L, x2: W - R, y1: Y(g), y2: Y(g), stroke: css("--grid"), "stroke-width": 1 }));
+    const t = sv("text", { x: L - 8, y: Y(g) + 4, "text-anchor": "end" }); t.textContent = `${g}%`; svg.append(t);
+  }
+  // x labels
+  const ticks = 6;
+  for (let i = 0; i <= ticks; i++) {
+    const t = x0 + ((x1 - x0) * i) / ticks;
+    const lab = sv("text", { x: X(t), y: H - 8, "text-anchor": i === 0 ? "start" : i === ticks ? "end" : "middle" });
+    lab.textContent = new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    svg.append(lab);
+  }
+
+  // stepped lines (a grade holds until the next graded item), 2px
+  const card = css("--card");
+  const endLabels = [];
+  for (const s of series) {
+    const color = courseColor(s.name);
+    let d = `M${X(+s.p[0].d)},${Y(s.p[0].grade)}`;
+    for (let i = 1; i < s.p.length; i++) d += ` H${X(+s.p[i].d)} V${Y(s.p[i].grade)}`;
+    svg.append(sv("path", { d, fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round" }));
+    for (const x of s.p) if (!x.carried) svg.append(sv("circle", { cx: X(+x.d), cy: Y(x.grade), r: 4, fill: color, stroke: card, "stroke-width": 2 }));
+    endLabels.push({ name: s.name, y: Y(s.p[s.p.length - 1].grade), g: s.p[s.p.length - 1].grade, color });
+  }
+  // direct end labels (de-overlapped) when there are few series
+  if (series.length <= 4) {
+    endLabels.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < endLabels.length; i++) if (endLabels[i].y - endLabels[i - 1].y < 15) endLabels[i].y = endLabels[i - 1].y + 15;
+    for (const e of endLabels) {
+      svg.append(sv("circle", { cx: W - R + 10, cy: e.y - 4, r: 4, fill: e.color }));
+      const t = sv("text", { x: W - R + 18, y: e.y, style: `fill:${css("--text-2")};font-weight:600` });
+      t.textContent = `${e.name} ${e.g.toFixed(1)}%`;
+      svg.append(t);
+    }
+  }
+
+  // crosshair + tooltip
+  const cross = sv("line", { y1: T, y2: H - B, stroke: css("--muted"), "stroke-width": 1, "stroke-dasharray": "3 3", visibility: "hidden" });
+  const hl = sv("g");
+  svg.append(cross, hl);
+  const tip = el("div", { class: "tip" });
+  const overlay = sv("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent" });
+  const move = (evt) => {
+    const r = svg.getBoundingClientRect();
+    const px = ((evt.clientX - r.left) / r.width) * W;
+    const t = x0 + ((px - L) / (W - L - R)) * (x1 - x0);
+    cross.setAttribute("x1", px); cross.setAttribute("x2", px); cross.setAttribute("visibility", "visible");
+    hl.replaceChildren();
+    const rows = [];
+    let event = null;
+    for (const s of series) {
+      const cur = [...s.p].reverse().find((x) => +x.d <= t) || s.p[0];
+      rows.push({ s, cur });
+      hl.append(sv("circle", { cx: px, cy: Y(cur.grade), r: 5, fill: courseColor(s.name), stroke: card, "stroke-width": 2 }));
+      // nearest real graded point to the cursor, for the "what changed" line
+      for (const x of s.p) if (!x.carried) {
+        const dist = Math.abs(X(+x.d) - px);
+        if (dist < 14 && (!event || dist < event.dist)) event = { dist, x, s };
+      }
+    }
+    rows.sort((a, b) => b.cur.grade - a.cur.grade);
+    tip.replaceChildren(
+      el("div", { class: "th", text: new Date(t).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) }),
+      ...rows.map(({ s, cur }) => el("div", { class: "tr" }, courseDot(s.name), s.name, el("b", { text: `${cur.grade.toFixed(1)}%` }))),
+      event ? el("div", { class: "tr", style: "margin-top:6px;display:block" }, "Graded: ", el("b", { style: "padding:0", text: `${event.x.label} (${event.x.score})` })) : null
+    );
+    tip.style.display = "block";
+    const bx = box.getBoundingClientRect();
+    let left = evt.clientX - bx.left + 14;
+    if (left + 260 > bx.width) left = evt.clientX - bx.left - 274;
+    tip.style.left = `${Math.max(0, left)}px`;
+    tip.style.top = `${Math.max(0, evt.clientY - bx.top - 40)}px`;
+  };
+  overlay.addEventListener("mousemove", move);
+  overlay.addEventListener("mouseleave", () => { tip.style.display = "none"; cross.setAttribute("visibility", "hidden"); hl.replaceChildren(); });
+  svg.append(overlay);
+  box.append(svg, tip);
+  if (series.length > 4) {
+    box.append(el("div", { class: "filters", style: "margin-top:8px" }, series.map((s) => el("span", { class: "course" }, courseDot(s.name), s.name))));
+  }
+}
+
+function renderGradeTable() {
+  const rows = DATA.gradeChanges.filter((c) => !hiddenGrades.has(c.course));
+  $("gradeTable").replaceChildren(el("table", { class: "data" },
+    el("thead", {}, el("tr", {}, ["Date", "Course", "Assignment"].map((h) => el("th", { text: h })), ["Score", "Course grade"].map((h) => el("th", { class: "num", text: h })))),
+    el("tbody", {}, rows.map((c) => el("tr", {},
+      el("td", { text: fmtDay(new Date(c.when)) }), el("td", { text: c.course }), el("td", { text: c.title }),
+      el("td", { class: "num", text: `${c.score}/${c.possible}` }), el("td", { class: "num", text: `${c.after.toFixed(1)}%` }))))));
+}
+
+function renderGrades() {
+  renderGradeTiles();
+  $("gradeChart").hidden = showTable;
+  $("gradeTable").hidden = !showTable;
+  $("tableToggle").textContent = showTable ? "Show as chart" : "Show as table";
+  for (const b of $("rangeSeg").querySelectorAll("button")) b.setAttribute("aria-pressed", String(+b.dataset.days === rangeDays));
+  if (showTable) renderGradeTable(); else renderGradeChart();
+}
+
+function renderChanges() {
+  const list = DATA.gradeChanges.slice(0, 12);
+  $("changesCard").hidden = !list.length;
+  $("changesList").replaceChildren(...list.map((c) => {
+    const pct = (100 * c.score) / c.possible, url = safeUrl(c.url);
+    const delta = c.before == null ? null : c.after - c.before;
+    return el("li", {},
+      el("div", {},
+        el("div", { class: "f-title" }, url ? el("a", { href: url, target: "_blank", rel: "noopener", text: c.title }) : c.title),
+        el("div", { class: "f-meta" }, courseTag(c.course), el("span", { text: relDay(new Date(c.when)) }),
+          delta == null ? el("span", { text: `Course grade ${c.after.toFixed(1)}%` })
+            : el("span", {}, `Course grade ${c.before.toFixed(1)}% → ${c.after.toFixed(1)}% `,
+                Math.abs(delta) < 0.05 ? el("span", { class: "pill neutral", text: "no change" })
+                  : el("span", { class: `pill ${delta > 0 ? "good" : "critical"}`, text: `${delta > 0 ? "▲" : "▼"} ${Math.abs(delta).toFixed(1)}` })))),
+      el("div", { class: "f-right" }, el("div", { class: "f-score", text: `${c.score}/${c.possible}` }), el("div", { class: "pill neutral", style: `box-shadow: inset 3px 0 0 ${scoreColor(pct)}`, text: `${pct.toFixed(0)}%` })));
+  }));
+}
+
+/* ---------- wiring ---------- */
+function renderAll() {
+  renderHeader(); renderTiles(); renderToday(); renderFilters(); renderWorkload(); renderDue();
+  renderNext(); renderMissing(); renderStudy(); renderAnnouncements(); renderGrades(); renderChanges();
+}
+
+$("rangeSeg").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  rangeDays = +b.dataset.days; save("gradeRange", rangeDays); renderGrades();
+});
+$("tableToggle").addEventListener("click", () => { showTable = !showTable; renderGrades(); });
+
+function applyTheme(t) {
+  if (t) document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme");
+}
+applyTheme(load("theme", null));
+$("themeBtn").addEventListener("click", () => {
+  const dark = document.documentElement.getAttribute("data-theme") === "dark" ||
+    (!document.documentElement.getAttribute("data-theme") && matchMedia("(prefers-color-scheme: dark)").matches);
+  const t = dark ? "light" : "dark"; applyTheme(t); save("theme", t); renderAll();
+});
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll);
+let resizeT; addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(renderAll, 150); });
+
+renderAll();
+setInterval(() => { renderNext(); renderDue(); renderTiles(); }, 30000);
+</script>
+</body>
+</html>

@@ -4,3 +4,5 @@ __pycache__/
 .venv/
 brief.md
 session.json
+dashboard.html
+grade_snapshots.json

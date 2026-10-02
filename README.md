@@ -1,14 +1,22 @@
 # Canvas Bot — Automated Morning Brief
 
-Every morning, pulls what's due from Canvas and sends you a brief:
+Every morning, pulls what's due from Canvas and builds you an interactive dashboard
+(it opens in your browser) plus a short text brief for your phone or email:
 
 - ⚠️ **Missing** work
 - 📅 Everything **due in the next 7 days** (skips stuff you already submitted)
 - 📣 Recent **announcements**
 - 📊 Current **grades** (lowest first)
-- 🧠 Optional **AI study plan** (via Claude): what to do today, in what order, and what to study
+- ✅ **Do today**: a checklist of what to work on today, with time estimates (tick things off; it remembers)
+- 📈 **Grade history** chart for every class, plus **recent grade changes** (which assignment moved your grade, and by how much)
+- 🧠 Optional **AI study plan** (via Claude): plans your day and what to study
 
-![Terminal preview](docs/preview.png)
+The dashboard has a workload chart (click a day to filter), course filters,
+live countdowns, links straight to each assignment in Canvas, and dark mode.
+It's saved as `dashboard.html` in the bot's folder. Bookmark it, and every
+run refreshes it.
+
+![Dashboard preview (sample data)](docs/preview.png)
 
 Delivered by **email**, **Discord**, and/or **phone push notification** (ntfy).
 
@@ -59,7 +67,7 @@ This adds submission status, missing work, grades, and announcements.
 
 ## AI study plan (optional)
 
-The 🧠 Study plan section is written by Claude. There are two ways to power it:
+The Do today plan and What to study sections are written by Claude. Without it, Do today is built from simple rules (missing work, things due within 36 hours, a head start on your busiest day). There are two ways to power it:
 
 - **Your Claude subscription (Pro/Max):** install [Claude Code](https://claude.com/claude-code) on the
   same computer and log in once:
@@ -70,9 +78,11 @@ The 🧠 Study plan section is written by Claude. There are two ways to power it
   The bot finds the `claude` command automatically. Each brief uses a small amount of your
   plan's usage. Claude only reads the brief text; it can't run commands or touch files.
 - **API key:** set `ANTHROPIC_API_KEY` in `.env` (from console.anthropic.com, billed separately,
-  about a cent per brief). This is the only option for GitHub Actions.
+  a few cents per brief). This is the only option for GitHub Actions.
 
 Use `--no-ai` to skip it.
+
+Grade history needs Option A or C below; the calendar feed doesn't include grades.
 
 ## 2. Try it locally
 

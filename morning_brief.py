@@ -1,11 +1,15 @@
 """Morning brief: pulls what's due from Canvas and turns it into a study plan.
 
 Usage:
-    python morning_brief.py            # build the brief, print it, and deliver it
-    python morning_brief.py --dry-run  # build and print only, skip delivery
+    python morning_brief.py            # build the brief, open the dashboard, and deliver it
+    python morning_brief.py --dry-run  # build and open the dashboard only, skip delivery
     python morning_brief.py --login    # log in to Canvas in a browser window once,
                                        # so the script can reuse your session
     python morning_brief.py --no-ai    # skip the AI study plan
+    python morning_brief.py --no-open  # don't pop the dashboard open in the browser
+
+The brief is saved as dashboard.html (interactive, opens in your browser) and
+brief.md (plain text, used for email/Discord/phone notifications).
 
 AI study plan: uses Claude Code (your Claude subscription) if the `claude`
 command is installed and logged in, or the API if ANTHROPIC_API_KEY is set.
@@ -14,18 +18,19 @@ Configuration comes from environment variables (or a .env file); see .env.exampl
 """
 
 import argparse
+import json
 import os
 import re
-import json
 import shutil
 import smtplib
 import subprocess
 import sys
-from pathlib import Path
-from collections import Counter
-from urllib.parse import urlencode
+import webbrowser
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
+from pathlib import Path
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 import requests
@@ -51,6 +56,10 @@ CLAUDE_MODEL = "claude-opus-5-5"
 SESSION_FILE = Path(
     os.environ.get("CANVAS_SESSION_FILE", Path.home() / ".canvas-bot" / "session.json")
 )
+# One grade snapshot per day, so the dashboard can show changes between runs
+GRADE_SNAPSHOTS = HERE / "grade_snapshots.json"
+DASHBOARD_TEMPLATE = HERE / "dashboard_template.html"
+DASHBOARD_FILE = HERE / "dashboard.html"
 
 
 class LoginExpired(Exception):
@@ -96,6 +105,10 @@ def canvas_get(path, params=None):
     return results
 
 
+def full_url(u):
+    return CANVAS_BASE_URL + u if u and u.startswith("/") else (u or "")
+
+
 def fetch_courses():
     courses = canvas_get(
         "/courses",
@@ -109,7 +122,11 @@ def fetch_courses():
         for e in c.get("enrollments", []):
             if e.get("computed_current_score") is not None:
                 score = e["computed_current_score"]
-        out[c["id"]] = {"name": c.get("course_code") or c["name"], "score": score}
+        out[c["id"]] = {
+            "name": c.get("course_code") or c["name"],
+            "score": score,
+            "weighted": bool(c.get("apply_assignment_group_weights")),
+        }
     return out
 
 
@@ -144,6 +161,109 @@ def fetch_announcements(course_ids, now):
     return canvas_get("/announcements", params)
 
 
+# ---------------------------------------------------------------- Grade history
+
+
+def course_grade(earned, possible, weights, weighted):
+    """Course percentage from per-assignment-group totals (ignores drop-lowest rules)."""
+    groups = [g for g in possible if possible[g] > 0]
+    if weighted and sum(weights.get(g, 0) for g in groups) > 0:
+        total_w = sum(weights.get(g, 0) for g in groups)
+        return 100 * sum(weights.get(g, 0) * earned[g] / possible[g] for g in groups) / total_w
+    total = sum(possible[g] for g in groups)
+    return 100 * sum(earned[g] for g in groups) / total if total else None
+
+
+def fetch_grade_history(courses):
+    """Rebuild each course's grade over time by replaying graded work in order.
+
+    Returns ({course name: [points]}, [grade changes]). It's an estimate: it
+    follows assignment-group weights but not drop-lowest or other special rules.
+    """
+    history, changes = {}, []
+    for cid, c in courses.items():
+        try:
+            groups = canvas_get(
+                f"/courses/{cid}/assignment_groups",
+                {"include[]": ["assignments", "submission"], "per_page": 100},
+            )
+        except RuntimeError as e:  # some courses hide grades; skip them
+            print(f"Grade history skipped for {c['name']}: {e}", file=sys.stderr)
+            continue
+
+        events = []
+        for g in groups:
+            for a in g.get("assignments") or []:
+                sub = a.get("submission") or {}
+                pts = a.get("points_possible") or 0
+                if a.get("omit_from_final_grade") or not pts or sub.get("excused"):
+                    continue
+                if sub.get("score") is None or not sub.get("graded_at"):
+                    continue
+                events.append(
+                    (
+                        parse_time(sub["graded_at"]),
+                        g["id"],
+                        g.get("group_weight") or 0,
+                        sub["score"],
+                        pts,
+                        a.get("name", "(untitled)"),
+                        full_url(a.get("html_url")),
+                    )
+                )
+        events.sort(key=lambda e: e[0])
+
+        earned, possible, weights = defaultdict(float), defaultdict(float), {}
+        series, prev = [], None
+        for when, gid, weight, score, pts, name, url in events:
+            earned[gid] += score
+            possible[gid] += pts
+            weights[gid] = weight
+            grade = course_grade(earned, possible, weights, c["weighted"])
+            if grade is None:
+                continue
+            series.append(
+                {"t": when.isoformat(), "grade": round(grade, 2), "label": name, "score": f"{score:g}/{pts:g}"}
+            )
+            changes.append(
+                {
+                    "course": c["name"],
+                    "title": name,
+                    "when": when.isoformat(),
+                    "score": score,
+                    "possible": pts,
+                    "before": None if prev is None else round(prev, 2),
+                    "after": round(grade, 2),
+                    "url": url,
+                }
+            )
+            prev = grade
+        if series:
+            history[c["name"]] = series
+
+    changes.sort(key=lambda ch: ch["when"], reverse=True)
+    return history, changes
+
+
+def update_snapshots(courses, now):
+    """Save today's grades and return {course: change since the previous snapshot}."""
+    try:
+        snaps = json.loads(GRADE_SNAPSHOTS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        snaps = {}
+    today = now.date().isoformat()
+    snaps[today] = {c["name"]: c["score"] for c in courses.values() if c["score"] is not None}
+    earlier = sorted(d for d in snaps if d < today)
+    deltas = {}
+    if earlier:
+        last = snaps[earlier[-1]]
+        for name, score in snaps[today].items():
+            if name in last and last[name] is not None and abs(score - last[name]) >= 0.01:
+                deltas[name] = {"delta": round(score - last[name], 2), "since": earlier[-1]}
+    GRADE_SNAPSHOTS.write_text(json.dumps(snaps, indent=1, sort_keys=True), encoding="utf-8")
+    return deltas
+
+
 # ---------------------------------------------------------------- Build brief
 
 
@@ -164,6 +284,10 @@ def fmt_due(dt, now):
     days = (dt.date() - now.date()).days
     when = {0: "Today", 1: "Tomorrow"}.get(days, fmt_day(dt))
     return f"{when} {fmt_clock(dt)}"
+
+
+def empty_data():
+    return {"courses": {}, "upcoming": [], "missing": [], "announcements": [], "has_status": False}
 
 
 def collect(now):
@@ -188,9 +312,7 @@ def collect(now):
                 "type": item.get("plannable_type", ""),
                 "points": p.get("points_possible"),
                 "due": due,
-                "url": CANVAS_BASE_URL + item["html_url"]
-                if item.get("html_url", "").startswith("/")
-                else item.get("html_url", ""),
+                "url": full_url(item.get("html_url")),
             }
         )
     upcoming.sort(key=lambda a: a["due"])
@@ -201,7 +323,7 @@ def collect(now):
             "title": a.get("name", "(untitled)"),
             "due": parse_time(a.get("due_at")),
             "points": a.get("points_possible"),
-            "url": a.get("html_url", ""),
+            "url": full_url(a.get("html_url")),
         }
         for a in fetch_missing()
     ]
@@ -213,9 +335,12 @@ def collect(now):
             ),
             "title": a.get("title", ""),
             "posted": parse_time(a.get("posted_at")),
+            "url": full_url(a.get("html_url")),
         }
         for a in fetch_announcements(list(courses), now)
     ]
+
+    history, changes = fetch_grade_history(courses)
 
     return {
         "courses": courses,
@@ -223,6 +348,8 @@ def collect(now):
         "missing": missing,
         "announcements": announcements,
         "has_status": True,
+        "grade_history": history,
+        "grade_changes": changes,
     }
 
 
@@ -275,7 +402,25 @@ def collect_from_ics(now):
             }
         )
     upcoming.sort(key=lambda a: a["due"])
-    return {"courses": {}, "upcoming": upcoming, "missing": [], "announcements": [], "has_status": False}
+    data = empty_data()
+    data["upcoming"] = upcoming
+    return data
+
+
+def hash_str(s):
+    """Small stable string hash (Python's hash() changes between runs)."""
+    h = 2166136261
+    for ch in s.encode("utf-8"):
+        h = ((h ^ ch) * 16777619) & 0xFFFFFFFF
+    return h
+
+
+def assign_ids(data):
+    """Give every item a stable id so the plan, checklist, and dashboard can refer to it."""
+    for prefix, key in (("u", "upcoming"), ("m", "missing")):
+        for a in data[key]:
+            raw = f"{a['course']}|{a['title']}|{a['due'].isoformat() if a['due'] else ''}"
+            a["id"] = prefix + format(hash_str(raw), "08x")
 
 
 def workload_by_day(data, now):
@@ -290,12 +435,49 @@ def workload_by_day(data, now):
     return [(d, counts[d], points[d]) for d in days]
 
 
-def render_plain(data, now):
+def default_today(data, now):
+    """A simple 'do today' list for when there's no AI plan."""
+    tasks, seen = [], set()
+
+    def add(item, task, why):
+        if item["id"] not in seen:
+            seen.add(item["id"])
+            tasks.append(
+                {"task": task, "course": item["course"], "minutes": 0, "why": why, "item_id": item["id"]}
+            )
+
+    for a in data["missing"][:3]:
+        add(a, f"Turn in or ask about: {a['title']}", "Missing. Check if late work is accepted.")
+    work = [a for a in data["upcoming"] if a["type"] != "event"]
+    for a in work:
+        if (a["due"] - now) <= timedelta(hours=36):
+            add(a, a["title"], f"Due {fmt_due(a['due'], now)}")
+    load = [w for w in workload_by_day(data, now)[1:4] if w[1] >= 2]
+    if load:
+        busiest = max(load, key=lambda w: (w[1], w[2]))[0]
+        big = [a for a in work if a["due"].date() == busiest]
+        if big:
+            a = max(big, key=lambda a: a["points"] or 0)
+            add(a, f"Get a head start: {a['title']}", f"{fmt_day(busiest)} is a busy day")
+    return tasks
+
+
+def render_plain(data, now, plan):
     lines = [f"# Morning Brief — {now.strftime('%A, %B')} {now.day}", ""]
-    if data.get("has_status"):
-        lines += ["_Already-submitted work is excluded._", ""]
-    else:
+    if not data.get("has_status"):
         lines += ["_Submission status unknown: some items may already be turned in._", ""]
+
+    if plan and plan.get("week"):
+        lines += [plan["week"], ""]
+
+    today = plan["today"] if plan else default_today(data, now)
+    if today:
+        lines.append("## ✅ Do today")
+        for t in today:
+            mins = f" (~{t['minutes']} min)" if t.get("minutes") else ""
+            course = f"{t['course']}: " if t.get("course") else ""
+            lines.append(f"- [ ] {course}{t['task']}{mins}")
+        lines.append("")
 
     if data["missing"]:
         lines.append(f"## ⚠️ Missing ({len(data['missing'])})")
@@ -314,12 +496,20 @@ def render_plain(data, now):
         lines.append(f"- **{fmt_due(a['due'], now)}** — {course}{a['title']}{pts}{tag}")
     lines.append("")
 
-    load = [w for w in workload_by_day(data, now) if w[1]]
-    if load:
-        lines.append("## 📈 Workload by day")
-        for d, n, pts in load:
-            pts_txt = f", {pts:g} pts" if pts else ""
-            lines.append(f"- {fmt_day(d)}: {n} item{'s' if n != 1 else ''}{pts_txt}")
+    if plan and plan.get("study"):
+        lines.append("## 🧠 What to study")
+        for s in plan["study"]:
+            lines.append(f"- **{s['course']}**: {s['focus']} — {s['why']}")
+        lines.append("")
+
+    changes = data.get("grade_changes", [])[:5]
+    if changes:
+        lines.append("## 📝 Recently graded")
+        for ch in changes:
+            delta = ""
+            if ch["before"] is not None:
+                delta = f" → course grade {ch['after'] - ch['before']:+.1f}"
+            lines.append(f"- {ch['course']}: {ch['title']} {ch['score']:g}/{ch['possible']:g}{delta}")
         lines.append("")
 
     if data["announcements"]:
@@ -331,32 +521,113 @@ def render_plain(data, now):
     graded = [(c["name"], c["score"]) for c in data["courses"].values() if c["score"] is not None]
     if graded:
         lines.append("## 📊 Current grades")
+        deltas = data.get("grade_deltas", {})
         for name, score in sorted(graded, key=lambda x: x[1]):
-            lines.append(f"- {name}: {score:.1f}%")
+            d = deltas.get(name)
+            change = f" ({d['delta']:+.1f})" if d else ""
+            lines.append(f"- {name}: {score:.1f}%{change}")
         lines.append("")
 
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------- AI study plan
+
+
 AI_INSTRUCTIONS = (
-    "You are writing a student's morning brief from their Canvas data (below). Write:\n"
-    "1. **This week**: 2 sentences on how heavy the week is and the crunch points.\n"
-    "2. **Today's plan**: a prioritized checklist of what to work on today, with rough "
-    "time estimates, weighing due date, points, missing work, and weak grades. "
-    "Spread big items across days so nothing piles up on the busiest day.\n"
-    "3. **What to study**: specific courses/topics to review and why (upcoming "
-    "quizzes/exams, low grades).\n"
-    "Only if the data says submission status is unknown, add one line reminding them "
-    "to skip anything already turned in. Keep it under 250 words, concise and encouraging. Use Markdown headings "
-    "and bullet lists, no tables. Don't invent assignments that aren't listed."
+    "You plan a college student's day from their Canvas data (below). Each item has an "
+    "id in [brackets]. Fill in:\n"
+    "- week: 1-2 sentences on how heavy the week is and where the crunch is.\n"
+    "- today: 3-6 concrete tasks for TODAY in priority order, weighing due dates, points, "
+    "missing work, weak grades, and spreading big items so the busiest day doesn't pile up. "
+    "For each: a short task (e.g. 'Finish Problem Set 5'), the course code, a time estimate "
+    "in minutes, a short why, and the item_id it relates to ('' if none).\n"
+    "- study: 1-4 courses/topics to review and why (upcoming quizzes/exams, low or "
+    "falling grades, recent low scores).\n"
+    "- note: one short encouraging line.\n"
+    "Only if submission status is unknown, mention in 'week' to skip anything already "
+    "turned in. Plain text, no Markdown. Don't invent assignments that aren't listed."
 )
 
+PLAN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "week": {"type": "string"},
+        "today": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string"},
+                    "course": {"type": "string"},
+                    "minutes": {"type": "integer"},
+                    "why": {"type": "string"},
+                    "item_id": {"type": "string"},
+                },
+                "required": ["task", "course", "minutes", "why", "item_id"],
+                "additionalProperties": False,
+            },
+        },
+        "study": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "course": {"type": "string"},
+                    "focus": {"type": "string"},
+                    "why": {"type": "string"},
+                },
+                "required": ["course", "focus", "why"],
+                "additionalProperties": False,
+            },
+        },
+        "note": {"type": "string"},
+    },
+    "required": ["week", "today", "study", "note"],
+    "additionalProperties": False,
+}
 
-def ai_prompt(plain_brief, now):
-    return f"It is {fmt_day(now, '%A')}, {fmt_clock(now)}.\n\n{plain_brief}"
+
+def ai_input(data, now):
+    """Compact, id-tagged version of the data for the AI."""
+    lines = [f"Now: {fmt_day(now, '%A')}, {fmt_clock(now)}"]
+    lines.append(
+        "Submission status: already-submitted work is excluded."
+        if data.get("has_status")
+        else "Submission status: UNKNOWN (some items may already be turned in)."
+    )
+    lines.append("\nMissing work:")
+    for a in data["missing"]:
+        due = fmt_day(a["due"]) if a["due"] else "?"
+        lines.append(f"[{a['id']}] {a['course']} | {a['title']} | was due {due} | {a['points'] or '?'} pts")
+    if not data["missing"]:
+        lines.append("(none)")
+    lines.append(f"\nDue in the next {DAYS_AHEAD} days:")
+    for a in data["upcoming"]:
+        pts = f"{a['points']:g} pts" if a["points"] else "? pts"
+        lines.append(f"[{a['id']}] {fmt_due(a['due'], now)} | {a['course']} | {a['title']} | {a['type']} | {pts}")
+    if not data["upcoming"]:
+        lines.append("(none)")
+    graded = [(c["name"], c["score"]) for c in data["courses"].values() if c["score"] is not None]
+    if graded:
+        lines.append("\nCurrent grades:")
+        for name, score in graded:
+            lines.append(f"{name}: {score:.1f}%")
+    recent = data.get("grade_changes", [])[:8]
+    if recent:
+        lines.append("\nRecently graded:")
+        for ch in recent:
+            lines.append(
+                f"{ch['course']} | {ch['title']} | {ch['score']:g}/{ch['possible']:g} | {ch['when'][:10]}"
+            )
+    if data["announcements"]:
+        lines.append("\nAnnouncements:")
+        for a in data["announcements"]:
+            lines.append(f"{a['course']}: {a['title']}")
+    return "\n".join(lines)
 
 
-def ai_via_api(plain_brief, now):
+def ai_via_api(text):
     """Claude API (needs ANTHROPIC_API_KEY; billed to your API account)."""
     import anthropic
 
@@ -365,23 +636,33 @@ def ai_via_api(plain_brief, now):
         model=CLAUDE_MODEL,
         max_tokens=16000,
         system=AI_INSTRUCTIONS,
-        output_config={"effort": "low"},
+        output_config={"effort": "low", "format": {"type": "json_schema", "schema": PLAN_SCHEMA}},
         betas=["server-side-fallback-2026-07-01"],
         fallbacks="default",
-        messages=[{"role": "user", "content": ai_prompt(plain_brief, now)}],
+        messages=[{"role": "user", "content": text}],
     )
-    if response.stop_reason == "refusal":
+    if response.stop_reason in ("refusal", "max_tokens"):
         return None
-    return "".join(b.text for b in response.content if b.type == "text").strip() or None
+    return json.loads("".join(b.text for b in response.content if b.type == "text"))
 
 
-def ai_via_claude_code(plain_brief, now):
+def ai_via_claude_code(text):
     """Claude Code CLI in print mode (uses your Claude subscription's usage)."""
-    exe = shutil.which("claude")
     result = subprocess.run(
         # --tools "": Claude only reads the text we pipe in; it can't run anything
-        [exe, "-p", AI_INSTRUCTIONS, "--tools", "", "--no-session-persistence"],
-        input=ai_prompt(plain_brief, now),
+        [
+            shutil.which("claude"),
+            "-p",
+            AI_INSTRUCTIONS,
+            "--tools",
+            "",
+            "--no-session-persistence",
+            "--output-format",
+            "json",
+            "--json-schema",
+            json.dumps(PLAN_SCHEMA),
+        ],
+        input=text,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -389,139 +670,85 @@ def ai_via_claude_code(plain_brief, now):
     )
     if result.returncode != 0:
         raise RuntimeError((result.stderr or result.stdout).strip()[:300])
-    return result.stdout.strip() or None
+    out = json.loads(result.stdout)
+    if out.get("is_error"):
+        raise RuntimeError(str(out.get("result", ""))[:300])
+    return out.get("structured_output") or json.loads(out["result"])
 
 
-def ai_study_plan(plain_brief, now):
+def ai_study_plan(data, now):
     """Pick an AI backend: API key if set, else Claude Code if installed, else none."""
+    text = ai_input(data, now)
     if os.environ.get("ANTHROPIC_API_KEY"):
-        return ai_via_api(plain_brief, now)
-    if shutil.which("claude"):
-        return ai_via_claude_code(plain_brief, now)
-    return None
-
-
-# ---------------------------------------------------------------- Terminal display
-
-
-def urgency_style(due, now):
-    hours = (due - now).total_seconds() / 3600
-    if hours < 24:
-        return "bold red"
-    if hours < 72:
-        return "yellow"
-    return "green"
-
-
-def countdown(due, now):
-    hours = (due - now).total_seconds() / 3600
-    if hours < 1:
-        return "< 1 hr"
-    if hours < 24:
-        return f"in {int(hours)} hr"
-    return f"in {int(hours // 24)}d {int(hours % 24)}h"
-
-
-def show_terminal(data, plan, warning, now):
-    """Pretty, colour-coded view of the brief for the terminal."""
-    from rich import box
-    from rich.console import Console
-    from rich.markdown import Markdown
-    from rich.panel import Panel
-    from rich.table import Table
-    from rich.text import Text
-
-    con = Console()
-    upcoming = data["upcoming"]
-    work = [a for a in upcoming if a["type"] != "event"]
-    load = workload_by_day(data, now)
-    busiest = max(load, key=lambda w: (w[1], w[2]), default=None)
-
-    stats = [f"[bold]{len(work)}[/] due in {DAYS_AHEAD} days"]
-    due_today = sum(1 for a in work if a["due"].date() == now.date())
-    if due_today:
-        stats.append(f"[bold red]{due_today} due today[/]")
-    if data["missing"]:
-        stats.append(f"[bold red]{len(data['missing'])} missing[/]")
-    if busiest and busiest[1]:
-        stats.append(f"busiest: [bold]{fmt_day(busiest[0])}[/]")
-    con.print(
-        Panel(
-            " · ".join(stats),
-            title=f"[bold]☀  Morning Brief — {now.strftime('%A, %B')} {now.day}",
-            border_style="bright_blue",
-            padding=(1, 2),
-        )
-    )
-
-    if warning:
-        con.print(Panel(Markdown(warning), border_style="red"))
-
-    if plan:
-        con.print(Panel(Markdown(plan), title="[bold]🧠 Study plan", border_style="magenta", padding=(1, 2)))
-
-    if data["missing"]:
-        t = Table(box=box.SIMPLE_HEAD, header_style="bold red", expand=True)
-        t.add_column("Course", style="bold")
-        t.add_column("Missing assignment")
-        t.add_column("Was due", justify="right")
-        for a in data["missing"]:
-            title = f"[link={a['url']}]{a['title']}[/link]" if a["url"] else a["title"]
-            t.add_row(a["course"], title, fmt_day(a["due"]) if a["due"] else "")
-        con.print(Panel(t, title="[bold red]⚠  Missing work", border_style="red"))
-
-    t = Table(box=box.SIMPLE_HEAD, header_style="bold", expand=True)
-    t.add_column("Due", no_wrap=True)
-    t.add_column("", no_wrap=True)
-    t.add_column("Course", style="cyan", no_wrap=True)
-    t.add_column("Assignment")
-    t.add_column("Pts", justify="right")
-    for a in upcoming:
-        style = "dim" if a["type"] == "event" else urgency_style(a["due"], now)
-        title = f"[link={a['url']}]{a['title']}[/link]" if a["url"] else a["title"]
-        if a["type"] == "event":
-            title += " [dim](event)[/]"
-        t.add_row(
-            Text(fmt_due(a["due"], now), style=style),
-            Text(countdown(a["due"], now), style=style),
-            a["course"],
-            title,
-            f"{a['points']:g}" if a["points"] else "",
-        )
-    if not upcoming:
-        t.add_row("", "", "", "Nothing due — enjoy it 🎉", "")
-    con.print(Panel(t, title=f"[bold]📅 Coming up (next {DAYS_AHEAD} days)", border_style="bright_blue"))
-
-    if any(n for _, n, _ in load):
-        most = max(n for _, n, _ in load)
-        t = Table.grid(padding=(0, 2))
-        for d, n, pts in load:
-            bar = "█" * round(n / most * 24) if n else "·"
-            color = "red" if n == most and n > 1 else "bright_blue"
-            label = f"{n} item{'s' if n != 1 else ''}" + (f" · {pts:g} pts" if pts else "") if n else ""
-            t.add_row(fmt_day(d), Text(bar, style=color), Text(label, style="dim"))
-        con.print(Panel(t, title="[bold]📈 Workload", border_style="bright_blue"))
-
-    if data["announcements"]:
-        t = Table.grid(padding=(0, 2))
-        for a in data["announcements"]:
-            t.add_row(Text(a["course"], style="cyan"), a["title"])
-        con.print(Panel(t, title="[bold]📣 Announcements", border_style="bright_blue"))
-
-    graded = sorted(
-        ((c["name"], c["score"]) for c in data["courses"].values() if c["score"] is not None),
-        key=lambda x: x[1],
-    )
-    if graded:
-        t = Table.grid(padding=(0, 2))
-        for name, score in graded:
-            color = "red" if score < 70 else "yellow" if score < 80 else "green"
-            bar = "█" * round(min(score, 100) / 5)
-            t.add_row(Text(name, style="cyan"), Text(f"{bar:<20}", style=color), Text(f"{score:.1f}%", style=f"bold {color}"))
-        con.print(Panel(t, title="[bold]📊 Grades", border_style="bright_blue"))
-
+        plan = ai_via_api(text)
+    elif shutil.which("claude"):
+        plan = ai_via_claude_code(text)
+    else:
+        return None
     if not plan:
-        con.print("[dim]Tip: install Claude Code (see README) to get an AI study plan here.[/]")
+        return None
+    # Only keep links to items that actually exist
+    ids = {a["id"] for a in data["upcoming"] + data["missing"]}
+    for t in plan.get("today", []):
+        if t.get("item_id") not in ids:
+            t["item_id"] = ""
+    return plan
+
+
+# ---------------------------------------------------------------- Dashboard
+
+
+def build_dashboard(data, plan, warning, now):
+    """Write dashboard.html: the template with this run's data embedded."""
+    courses = sorted(
+        {c["name"] for c in data["courses"].values()}
+        | {a["course"] for a in data["upcoming"] + data["missing"] if a["course"]}
+    )
+    scores = {c["name"]: c["score"] for c in data["courses"].values()}
+
+    def item(a):
+        return {
+            "id": a["id"],
+            "course": a["course"],
+            "title": a["title"],
+            "type": a.get("type", "assignment"),
+            "points": a["points"],
+            "due": a["due"].isoformat() if a["due"] else None,
+            "url": a["url"],
+        }
+
+    payload = {
+        "generated": now.isoformat(),
+        "today": now.date().isoformat(),
+        "daysAhead": DAYS_AHEAD,
+        "hasStatus": data.get("has_status", False),
+        "warning": warning,
+        "courses": [
+            {"name": n, "score": scores.get(n), "change": data.get("grade_deltas", {}).get(n)}
+            for n in courses
+        ],
+        "upcoming": [item(a) for a in data["upcoming"]],
+        "missing": [item(a) for a in data["missing"]],
+        "announcements": [
+            {
+                "course": a["course"],
+                "title": a["title"],
+                "posted": a["posted"].isoformat() if a["posted"] else None,
+                "url": a.get("url", ""),
+            }
+            for a in data["announcements"]
+        ],
+        "plan": plan,
+        "todayTasks": plan["today"] if plan else default_today(data, now),
+        "gradeHistory": data.get("grade_history", {}),
+        "gradeChanges": data.get("grade_changes", [])[:40],
+    }
+    blob = json.dumps(payload, ensure_ascii=False)
+    # Keep the JSON from closing the <script> tag early
+    blob = blob.replace("</", "<\\/").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+    html = DASHBOARD_TEMPLATE.read_text(encoding="utf-8").replace("/*__BRIEF_DATA__*/null", blob)
+    DASHBOARD_FILE.write_text(html, encoding="utf-8")
+    return DASHBOARD_FILE
 
 
 # ---------------------------------------------------------------- Browser login
@@ -617,10 +844,6 @@ def send_ntfy(title, body):
 # ---------------------------------------------------------------- Main
 
 
-def empty_data():
-    return {"courses": {}, "upcoming": [], "missing": [], "announcements": [], "has_status": False}
-
-
 def load_data(now):
     """Collect data from the best available source. Returns (data, warning)."""
     if CANVAS_BASE_URL and CANVAS_TOKEN:
@@ -637,7 +860,7 @@ def load_data(now):
                 return data, None
             except LoginExpired:
                 warning = (
-                    "⚠️ **Canvas login expired.** On your computer, run "
+                    "Canvas login expired. On your computer, run "
                     "`python morning_brief.py --login` to log in again."
                 )
                 if not CANVAS_ICS_URL:
@@ -658,9 +881,10 @@ def load_data(now):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dry-run", action="store_true", help="show only, don't deliver")
+    parser.add_argument("--dry-run", action="store_true", help="don't send email/Discord/push")
     parser.add_argument("--login", action="store_true", help="log in to Canvas in a browser")
     parser.add_argument("--no-ai", action="store_true", help="skip the AI study plan")
+    parser.add_argument("--no-open", action="store_true", help="don't open the dashboard")
     args = parser.parse_args()
 
     # Don't crash on emoji when output goes to a log file (e.g. Task Scheduler)
@@ -675,31 +899,30 @@ def main():
         return
 
     now = datetime.now(TZ)
+    print("Checking Canvas…", file=sys.stderr)
     data, warning = load_data(now)
-    plain = render_plain(data, now)
-    if warning:
-        plain = warning + "\n\n" + plain
+    assign_ids(data)
+    if data["courses"]:
+        data["grade_deltas"] = update_snapshots(data["courses"], now)
 
     plan = None
     if not args.no_ai:
         try:
-            if sys.stdout.isatty():
-                from rich.console import Console
-
-                with Console().status("Asking Claude for today's study plan…"):
-                    plan = ai_study_plan(plain, now)
-            else:
-                plan = ai_study_plan(plain, now)
+            if shutil.which("claude") or os.environ.get("ANTHROPIC_API_KEY"):
+                print("Asking Claude for today's plan…", file=sys.stderr)
+            plan = ai_study_plan(data, now)
         except Exception as e:  # never lose the brief because the AI step failed
             print(f"AI study plan skipped: {e}", file=sys.stderr)
 
-    brief = plan + "\n\n---\n\n" + plain if plan else plain
+    brief = render_plain(data, now, plan)
+    if warning:
+        brief = f"⚠️ **{warning}**\n\n{brief}"
     (HERE / "brief.md").write_text(brief, encoding="utf-8")
 
-    if sys.stdout.isatty():
-        show_terminal(data, plan, warning, now)
-    else:
-        print(brief)
+    dashboard = build_dashboard(data, plan, warning, now)
+    print(f"✓ Dashboard: {dashboard}", file=sys.stderr)
+    if not args.no_open and sys.stdout.isatty():
+        webbrowser.open(dashboard.as_uri())
 
     if args.dry_run:
         return
